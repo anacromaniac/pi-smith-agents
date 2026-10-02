@@ -51,7 +51,6 @@ function makePi() {
     registerEntryRenderer: vi.fn(),
     registerTool: vi.fn(),
     registerCommand: vi.fn(),
-    registerShortcut: vi.fn(),
     registerFlag: vi.fn(),
     getFlag: vi.fn(),
     getAllTools: vi.fn(() => [] as any[]),

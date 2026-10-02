@@ -23,7 +23,6 @@ function makePi() {
         tools.set(tool.name, tool);
       }),
       registerCommand: vi.fn(),
-      registerShortcut: vi.fn(),
       registerEntryRenderer: vi.fn(),
       registerFlag: vi.fn(),
       getFlag: vi.fn(),

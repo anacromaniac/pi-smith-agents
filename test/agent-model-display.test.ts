@@ -28,7 +28,6 @@ function agentTool() {
     registerEntryRenderer: vi.fn(),
     registerTool: vi.fn((tool: any) => tools.set(tool.name, tool)),
     registerCommand: vi.fn(),
-    registerShortcut: vi.fn(),
     registerFlag: vi.fn(),
     getFlag: vi.fn(),
     getAllTools: vi.fn(() => [] as any[]),
