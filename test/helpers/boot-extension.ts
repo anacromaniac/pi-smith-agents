@@ -23,8 +23,6 @@ export interface BootedPi {
   registeredFlags: Map<string, any>;
   /** Slash commands the extension registered, by name. */
   commands: Map<string, any>;
-  /** Keyboard shortcuts the extension registered, by key binding. */
-  shortcuts: Map<string, any>;
 }
 
 /**
@@ -41,7 +39,6 @@ export function makePi(flags: Record<string, boolean | string> = {}): BootedPi {
   const entryRenderers = new Map<string, any>();
   const registeredFlags = new Map<string, any>();
   const commands = new Map<string, any>();
-  const shortcuts = new Map<string, any>();
   const activeTools: string[] = [];
   const pi = {
     registerMessageRenderer: vi.fn(),
@@ -51,7 +48,6 @@ export function makePi(flags: Record<string, boolean | string> = {}): BootedPi {
       if (!activeTools.includes(t.name)) activeTools.push(t.name);
     }),
     registerCommand: vi.fn((name: string, command: any) => commands.set(name, command)),
-    registerShortcut: vi.fn((key: string, options: any) => shortcuts.set(key, options)),
     registerFlag: vi.fn((name: string, options: any) => registeredFlags.set(name, options)),
     getFlag: vi.fn((name: string) => flags[name]),
     on: vi.fn((event: string, handler: any) => lifecycle.set(event, handler)),
@@ -76,7 +72,7 @@ export function makePi(flags: Record<string, boolean | string> = {}): BootedPi {
     sendMessage: vi.fn(),
     exec: vi.fn(async () => ({ stdout: "", stderr: "", code: 0, killed: false })),
   } as any;
-  return { pi, tools, lifecycle, entryRenderers, registeredFlags, commands, shortcuts };
+  return { pi, tools, lifecycle, entryRenderers, registeredFlags, commands };
 }
 
 /** A mock ExtensionContext — the second half of what a tool's `execute` receives. */
@@ -128,13 +124,7 @@ export function hermeticDir(opts: {
 
   mkdirSync(join(dir, ".pi"), { recursive: true });
   if (opts.settings) {
-    // Subagents start disabled in a real session (the `/agents on|off` master
-    // switch). These tests drive subagent behavior, so a supplied settings file
-    // seeds the switch on unless the test asks for something else.
-    writeFileSync(
-      join(dir, ".pi", "subagents.json"),
-      JSON.stringify({ subagentsEnabled: true, ...opts.settings }),
-    );
+    writeFileSync(join(dir, ".pi", "subagents.json"), JSON.stringify(opts.settings));
   }
   if (opts.agentFiles) {
     mkdirSync(join(dir, ".pi", "agents"), { recursive: true });
