@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -502,12 +502,30 @@ Real.`);
     expect(result.has("real")).toBe(true);
   });
 
+  it.each(["Explore", "Plan"])("loads the copyable %s example with its standalone read-only role", (name) => {
+    const example = readFileSync(new URL(`../examples/agents/${name}.md`, import.meta.url), "utf8");
+    writeAgent(name, example);
+
+    const agent = loadCustomAgents(tmpDir, true).get(name)!;
+    expect(agent.name).toBe(name);
+    expect(agent.displayName).toBe(name);
+    expect(agent.builtinToolNames).toEqual(["read", "bash", "grep", "find", "ls"]);
+    expect(agent.extensions).toBe(true);
+    expect(agent.skills).toBe(true);
+    expect(agent.promptMode).toBe("replace");
+    expect(agent.model).toBeUndefined();
+    expect(agent.isDefault).toBeUndefined();
+    expect(agent.systemPrompt).toBe(example.split("---\n")[2].trim());
+    expect(agent.systemPrompt).toContain("# CRITICAL: READ-ONLY MODE - NO FILE MODIFICATIONS");
+    expect(agent.description).toContain(name === "Explore" ? "Fast read-only search agent" : "Software architect agent");
+  });
+
   it("allows agents with names matching defaults (overrides them)", () => {
-    writeAgent("Explore", `---
-description: Custom Explore
+    writeAgent("general-purpose", `---
+description: Custom general-purpose
 ---
 
-Custom explore agent.`);
+Custom general-purpose agent.`);
     writeAgent("custom", `---
 description: Custom Agent
 ---
@@ -515,8 +533,8 @@ description: Custom Agent
 Should be loaded.`);
 
     const result = loadCustomAgents(tmpDir);
-    expect(result.has("Explore")).toBe(true);
-    expect(result.get("Explore")!.description).toBe("Custom Explore");
+    expect(result.has("general-purpose")).toBe(true);
+    expect(result.get("general-purpose")!.description).toBe("Custom general-purpose");
     expect(result.has("custom")).toBe(true);
   });
 

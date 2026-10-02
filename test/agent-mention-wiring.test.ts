@@ -29,6 +29,7 @@ import { getDefaultMaxTurns, resumeAgent, runAgent, setDefaultMaxTurns } from ".
 import subagentsExtension from "../src/index.js";
 import { runMentionClone } from "../src/mention-clone.js";
 import { ctx, flush, type Hermetic, hermeticDir, makePi, textOf } from "./helpers/boot-extension.js";
+import { exampleAgentFiles } from "./helpers/example-agents.js";
 
 let hermetic: Hermetic | undefined;
 /** The most recently booted extension, so teardown runs even when a test throws. */
@@ -88,7 +89,10 @@ function finishedRun(session: any) {
 
 /** Boot the real extension. `outputTranscript: false` keeps the run off disk. */
 function boot(settings: Record<string, unknown> = {}) {
-  hermetic = hermeticDir({ settings: { outputTranscript: false, ...settings } });
+  hermetic = hermeticDir({
+    settings: { outputTranscript: false, ...settings },
+    agentFiles: exampleAgentFiles,
+  });
   const b = makePi();
   subagentsExtension(b.pi);
   booted = b.lifecycle;

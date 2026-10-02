@@ -60,10 +60,10 @@ A **card in the transcript**, updating as the run goes:
 ▸ SubagentWorkflow  auth-audit                       3/7 agents · 1m12s
   Find routes missing auth checks, then verify each finding
   ╭─ Scan
-  │ └─ ✔ discover        · Explore · haiku 4.5 · 26.4k · 8 tool calls · 25s
+  │ └─ ✔ discover        · general-purpose · haiku 4.5 · 26.4k · 8 tool calls · 25s
   ╰─ Audit
-    ├─ ✔ audit:src/a.ts  · Explore · haiku 4.5 · 18.4k · 12 tool calls · 42s
-    ├─ ⟳ audit:src/b.ts  · Explore · haiku 4.5 · 8 tool calls · 21s
+    ├─ ✔ audit:src/a.ts  · general-purpose · haiku 4.5 · 18.4k · 12 tool calls · 42s
+    ├─ ⟳ audit:src/b.ts  · general-purpose · haiku 4.5 · 8 tool calls · 21s
     └─ ⟳ audit:src/c.ts
   ⎿  auditing 6 route files
 ```
@@ -238,13 +238,15 @@ Spawns one subagent and resolves to its final text — or, with `schema`, to a v
 |---|---|---|
 | `label` | string | Display name in the progress tree. Also the handle `resume` addresses |
 | `phase` | string | Put this agent in a named group, overriding the ambient `phase()`. **Use it inside `pipeline`/`parallel` stages**, where the ambient phase races |
-| `agentType` | string | Which agent definition to use. Defaults to `general-purpose`; built-ins are `general-purpose`, `Explore`, `Plan`, plus your custom agents |
-| `model` | string | `provider/modelId`, or fuzzy like `haiku` |
+| `agentType` | string | Which agent definition to use. Defaults to `general-purpose`, the only built-in. `Explore` and `Plan` require installing the [custom examples](../README.md#default-agent-types) |
+| `model` | string | `provider/modelId`, or fuzzy like `haiku`. For embedded `general-purpose`: this option overrides `generalPurposeModel`, which otherwise precedes the parent model |
 | `effort` | string | `minimal`, `low`, `medium`, `high`, `xhigh`, `max`. Omitted, the agent definition's own `thinking` decides, then the parent's |
 | `isolation` | `"worktree"` | Run in a throwaway git worktree. Only when agents write files in parallel and would collide — it costs setup time and disk per agent |
 | `gate` | string | A shell command run after the agent finishes; a non-zero exit fails the agent and its output becomes the error |
 | `resume` | string | Continue the child that ran under that label instead of starting fresh |
 | `schema` | object | A JSON Schema with an object root. Resolves to the validated object instead of text |
+
+The configured [`generalPurposeModel`](../README.md#persistent-settings) must be an exact available `provider/modelId` with configured credentials. An invalid or unavailable configured model fails the agent instead of falling back to another provider or the parent; the setting does not apply to custom definitions.
 
 Any other key is rejected **by name** at the call. Note that this checks option *keys*, not option *values* — an `agentType` that names no known agent falls back to `general-purpose` silently.
 

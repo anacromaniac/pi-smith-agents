@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING: `general-purpose` is the only built-in agent; its default model is configurable with `generalPurposeModel`.** Copy the preserved `Explore` and `Plan` definitions from `examples/agents/` into `.pi/agents/` to retain their role prompts and read-only built-in tools; otherwise those names follow the unknown-type fallback policy. The setting requires an exact available `provider/modelId`, per-call `model` wins, and `null` inherits the parent (clearing any global value when set per-project); custom definitions are unaffected.
+
 ### Fixed
 - **Host-provided packages are now wildcard peer dependencies.** TypeBox is no longer installed as an extension runtime dependency, avoiding Pi's startup warning and duplicate runtime modules. Development installs retain both TypeBox packages for builds and tests.
 - **The workflow stand-down now recognises a lowercase `workflow` tool** ([#283](https://github.com/tintinweb/pi-subagents/issues/283) — thanks [@zampierilucas](https://github.com/zampierilucas)). The match is exact on purpose, and the set held `Workflow` and `SubagentWorkflow` only, so `@quintinshaw/pi-dynamic-workflows` — which registers lowercase `workflow` — never tripped it: with `workflowsEnabled` unset, both orchestrators reached the model and nothing warned. Adding the third name is the whole fix; exactness is kept, so a `list_workflows` still cannot take the feature down.

@@ -13,7 +13,7 @@
  * feeds it: the host reading the record's snapshot and handing it over.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../src/agent-runner.js", () => ({
   runAgent: vi.fn(),
@@ -30,6 +30,7 @@ vi.mock("../src/worktree.js", () => ({
 import { AgentManager } from "../src/agent-manager.js";
 import { runAgent } from "../src/agent-runner.js";
 import { registerAgents } from "../src/agent-types.js";
+import { setGeneralPurposeModel } from "../src/general-purpose-model.js";
 import { createWorkflowHost } from "../src/workflow/host.js";
 import type { WorkflowSpawnRequest } from "../src/workflow/runtime.js";
 import { ctx } from "./helpers/boot-extension.js";
@@ -85,6 +86,40 @@ describe("the workflow host reports a child's effective configuration", () => {
     vi.mocked(runAgent).mockReset();
     registerAgents(new Map());
     manager = new AgentManager();
+  });
+
+  afterEach(() => { setGeneralPurposeModel(null); });
+
+  it("uses the configured general-purpose model", async () => {
+    const configured = { provider: "test", id: "configured", name: "Configured" };
+    setGeneralPurposeModel("test/configured");
+    childSessionReports({ model: configured });
+    const host = createWorkflowHost({
+      pi, ctx: ctx({ modelRegistry: { find: vi.fn(() => configured), getAvailable: vi.fn(() => [configured]) } }), manager,
+    });
+    const result = await host.spawnAgent(spawnRequest());
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(runAgent).mock.calls[0]?.[3].model).toEqual(configured);
+  });
+
+  it("rejects an unavailable configured model without spawning", async () => {
+    setGeneralPurposeModel("test/missing");
+    const host = createWorkflowHost({ pi, ctx: ctx({}), manager });
+    const result = await host.spawnAgent(spawnRequest());
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("Configured generalPurposeModel is unavailable") });
+    expect(runAgent).not.toHaveBeenCalled();
+  });
+
+  it("lets a script model override an unavailable configured default", async () => {
+    const explicit = { provider: "test", id: "explicit", name: "Explicit" };
+    setGeneralPurposeModel("test/missing");
+    childSessionReports({ model: explicit });
+    const host = createWorkflowHost({
+      pi, ctx: ctx({ modelRegistry: { find: vi.fn(() => explicit), getAvailable: vi.fn(() => [explicit]) } }), manager,
+    });
+    const result = await host.spawnAgent(spawnRequest({ model: "test/explicit" }));
+    expect(result.ok).toBe(true);
+    expect(vi.mocked(runAgent).mock.calls[0]?.[3].model).toEqual(explicit);
   });
 
   it("hands over the model the session actually resolved to, not the script's spelling", async () => {

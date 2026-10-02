@@ -19,6 +19,7 @@ import { resumeAgent, runAgent } from "../src/agent-runner.js";
 import subagentsExtension from "../src/index.js";
 import { runMentionClone } from "../src/mention-clone.js";
 import { ctx, type Hermetic, hermeticDir, makePi } from "./helpers/boot-extension.js";
+import { exampleAgentFiles } from "./helpers/example-agents.js";
 
 let hermetic: Hermetic | undefined;
 let booted: Map<string, any> | undefined;
@@ -48,7 +49,10 @@ function fakeSession() {
 }
 
 function boot(settings: Record<string, unknown> = {}) {
-  hermetic = hermeticDir({ settings: { outputTranscript: false, ...settings } });
+  hermetic = hermeticDir({
+    settings: { outputTranscript: false, ...settings },
+    agentFiles: exampleAgentFiles,
+  });
   const b = makePi();
   subagentsExtension(b.pi);
   booted = b.lifecycle;

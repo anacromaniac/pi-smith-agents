@@ -61,11 +61,11 @@ Third-party adapters report running it elsewhere. These are maintained independe
 
 ## Quick Start
 
-The parent agent spawns sub-agents using the `Agent` tool:
+The parent agent spawns sub-agents using the `Agent` tool. Only `general-purpose` is built in; `Explore` and `Plan` are [optional custom examples](#default-agent-types).
 
 ```
 Agent({
-  subagent_type: "Explore",
+  subagent_type: "general-purpose",
   prompt: "Find all files that handle authentication",
   description: "Find auth files",
   run_in_background: true,
@@ -80,7 +80,7 @@ Add a `schedule` field to register the agent to fire later instead of running no
 
 ```
 Agent({
-  subagent_type: "Explore",
+  subagent_type: "general-purpose",
   prompt: "Look at recent commits and summarize what changed since last week",
   description: "Weekly commit review",
   schedule: "0 0 9 * * 1",   // 9am every Monday (6-field cron)
@@ -142,6 +142,8 @@ While subagents are running, a Claude Code-style navigable list renders **below*
 Running [workflows](#subagentworkflow) appear as a single `workflow` row above the agents, carrying their agent counts in place of a description. `Enter` on one opens the same two-pane inspector `/agents → Workflows` does, rather than a conversation overlay. A run's own agents are *not* listed separately — they belong to the run, which reports for them, so they are filtered out of the fleet list, the above-editor widget, the `/agents` menus and `@handle` resolution exactly as nested children are. They are also outside the `maxConcurrent` pool: the run has its own concurrency cap, and routing a fan-out through the session pool as well would let one workflow starve everything else. The agents are ordered earliest-launched first, and only agents you can actually open are shown (pending/queued agents with no session yet appear once they start). At an **empty prompt**, press `↓` (or `←`) to move focus from the prompt into the list — the selected row is marked `●`, the rest `○`. The selected row renders in the theme's primary text color rather than the muted/dim treatment of the others; an agent with a configured `color` shows its badge there too, bolded. `↑`/`↓` move the selection, `Enter` opens the selected agent's live conversation overlay (it auto-updates as the agent works), and `Esc` (or `↑` above `main`) returns to the prompt. Selecting `main` returns to the normal view. Inside the overlay, press `Enter` to steer the running agent — type a message and `Enter` to send it (`Esc` or an empty submit returns), and it redirects the agent the same way the `steer_subagent` tool does. A viewer stays open when its agent finishes so you can read the final output, and finished agents linger in the list for a few seconds before dropping out. Typing anything at a non-empty prompt behaves normally — the list only captures arrow keys when the prompt is empty. Disable it entirely via `/agents → Settings → Fleet view`.
 
 ### Agent mentions
+
+The `Explore` and `Plan` handles below assume you have installed the [custom examples](#default-agent-types).
 
 Subagents are addressable. Every agent has a typeable handle — the agent type, lowercased, numbered when instances collide (`explore`, `explore-2`) — and `@handle <message>` at the prompt talks to that agent, whatever state it happens to be in. Type `@` to pick one:
 
@@ -241,15 +243,20 @@ Group completions render each agent as a separate block. The LLM receives struct
 
 | Type | Tools | Model | Prompt Mode | Description |
 |------|-------|-------|-------------|-------------|
-| `general-purpose` | all 7 | inherit | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
-| `Explore` | read, bash, grep, find, ls | inherit | `replace` (standalone) | Fast codebase exploration (read-only) |
-| `Plan` | read, bash, grep, find, ls | inherit | `replace` (standalone) | Software architect for implementation planning (read-only) |
+| `general-purpose` | all 7 | `generalPurposeModel` or parent | `append` (parent twin) | Inherits the parent's full system prompt — same rules, CLAUDE.md, project conventions |
 
-The `general-purpose` agent is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does. Explore and Plan use standalone prompts tailored to their read-only roles.
+The only embedded agent, `general-purpose`, is a **parent twin** — it receives the parent's entire system prompt plus a sub-agent context bridge, so it follows the same rules the parent does. It can be **ejected** (`/agents` → select agent → Eject) as a `.md` file for customization, **overridden** with `.pi/agents/general-purpose.md`, or **disabled** with `enabled: false` frontmatter.
 
-Default agents can be **ejected** (`/agents` → select agent → Eject) to export them as `.md` files for customization, **overridden** by creating a `.md` file with the same name (e.g. `.pi/agents/general-purpose.md`), or **disabled** per-project with `enabled: false` frontmatter.
+**Breaking: `Explore` and `Plan` are no longer built in.** Without custom definitions, those names follow the unknown-type policy: by default they fall back to `general-purpose`, losing their standalone role prompts and read-only built-in tool lists. To retain that distinction, copy [`examples/agents/Explore.md`](examples/agents/Explore.md) and [`examples/agents/Plan.md`](examples/agents/Plan.md) into your project's `.pi/agents/` (or your global agent directory):
 
-All three default agents inherit the parent session model. To run a cheap read-only search on a smaller model, pin it per call instead of globally — e.g. `Agent(..., subagent_type: "Explore", model: "haiku")`.
+```bash
+mkdir -p .pi/agents
+cp /path/to/pi-subagents/examples/agents/{Explore,Plan}.md .pi/agents/
+```
+
+These optional examples preserve the former prompts and `read, bash, grep, find, ls` built-ins, with `extensions: true`, `skills: true`, and `prompt_mode: replace`. They still inherit extension tools; the read-only role is not a sandbox. Once installed, `Agent({ subagent_type: "Explore", model: "haiku", ... })` selects the custom definition.
+
+For the embedded `general-purpose`, model precedence is **per-call `model` → `generalPurposeModel` → parent session**. The setting accepts an exact available `provider/modelId`, or `null` to inherit; unavailable models or missing credentials are errors, never silent provider or parent fallbacks. It does not apply to custom definitions, including a `general-purpose` override. See [Persistent settings](#persistent-settings).
 
 ## Custom Agents
 
@@ -625,7 +632,9 @@ Runtime tuning values set via `/agents` → Settings (max concurrency, max foreg
 
 **Strict agent files** (`strictAgentFiles`, default `false`): when on, an unreadable or unparseable [agent file](#custom-agents) aborts extension load at startup and names the file, instead of being skipped with a warning — so a checked-in `.pi/agents/` can't silently fall through to a same-named agent from another location. Startup only: the mid-session reload that runs on each `Agent` call keeps warning either way, since a bad edit shouldn't kill a session on an unrelated spawn. Also settable from `/agents → Settings → Strict agent files`.
 
-**Disable defaults** (`disableDefaultAgents`, default `false`): when on, the three built-in agents (general-purpose, Explore, Plan) are not registered — only your project/global custom agents are advertised and spawnable. User-defined agents are unaffected, including ones that override a default by name. The Agent tool's type list updates on the next pi session (the tool schema is registered at startup).
+**General-purpose model** (`generalPurposeModel`, default `null`): the default model for the embedded `general-purpose` only, including unknown-type dispatch that falls back to it. Set an exact `provider/modelId` available with configured credentials in pi's registry; fuzzy names and provider fallback are not supported for this setting. An unavailable model fails the spawn rather than inheriting silently. Per-call `model` overrides this default; `null` inherits the parent session model and, in the project file, clears a global value. Custom agents, including a `general-purpose` override, retain their own model rules.
+
+**Disable defaults** (`disableDefaultAgents`, default `false`): when on, the built-in `general-purpose` is not registered — only your project/global custom agents are advertised and spawnable. User-defined agents are unaffected, including ones that override a default by name. The Agent tool's type list updates on the next pi session (the tool schema is registered at startup).
 
 **Agent mentions** (`agentMentions`, default `"model"`): whether [`@handle message`](#agent-mentions) at the prompt addresses that subagent instead of the main model — messaging, resuming or starting it — and whether `@` offers agents alongside pi's file completion. `"model"` and `"direct"` differ only in [who starts an agent that isn't running](#starting-a-new-agent): an off-screen clone of this conversation, via a `<system-reminder>` and a real `Agent` call, or this extension, immediately and with no model call. Messaging and resuming are direct in both. `"off"` gates all three actions plus the suggestion list, so `@` means only "attach a file" again and every `@…` prompt reaches the main model verbatim. Toggle via `/agents → Settings → Agent mentions`; applied live. The booleans this setting used to take are still read — `true` as `"model"`, `false` as `"off"`.
 
@@ -802,7 +811,7 @@ pi.events.emit("subagents:rpc:spawn", {
 
 `options` is the manager's spawn-option object, not the `Agent` tool's parameter schema — the background flag is `isBackground`, and the tool's snake_case `run_in_background` is forwarded verbatim and ignored. Every RPC spawn returns its id immediately and runs detached either way; `isBackground: true` is what makes the agent occupy one of the `maxConcurrent` slots (and queue behind them when they are full). It does not affect `subagents:created`, which is never emitted for an RPC spawn at all — the first event you see for one is `subagents:started`. Leaving it unset starts the agent immediately regardless of the limit. `maxConcurrentForeground` never applies here whatever `isBackground` says: it bounds only spawns a caller is blocking on inline, and every RPC spawn is detached. A top-level RPC spawn renders in the widget and FleetView while it runs, with the same live tool activity and turn counter an `Agent`-tool spawn gets — only an explicit `isBackground: false` is dropped by the widget's default `background` mode, the way a foreground `Agent` call is. Nested spawns stay hidden from both.
 
-`options.model` accepts either a `Model` object (e.g. `ctx.model`) or a `"provider/modelId"` string — strings are resolved against `ctx.modelRegistry` at the RPC boundary, so cross-extension callers can forward serializable values without losing auth context. Resolution is fuzzy, so a bare `"sonnet"` can land on a provider you never named: with [Model Scope](#model-scope) on, an override that resolves outside `enabledModels` is refused with an error envelope listing the allowed models, exactly as a caller-supplied `Agent({ model })` is. `null` means unset — the agent inherits, same as omitting the field.
+`options.model` accepts either a `Model` object (e.g. `ctx.model`) or a `"provider/modelId"` string — strings are resolved against `ctx.modelRegistry` at the RPC boundary, so cross-extension callers can forward serializable values without losing auth context. Resolution is fuzzy, so a bare `"sonnet"` can land on a provider you never named: with [Model Scope](#model-scope) on, an override that resolves outside `enabledModels` is refused with an error envelope listing the allowed models, exactly as a caller-supplied `Agent({ model })` is. `null` means unset, same as omitting the field: the embedded `general-purpose` uses `generalPurposeModel` if configured, then the parent model; custom agents retain their own model rules.
 
 `options.cwd` (absolute path to an existing directory — anything else returns an error envelope; `null` means unset) runs the agent in a different working directory than the parent session. Its tools operate there and the prompt's environment block describes it, but **`.pi` config still loads from the parent session's project** — the target directory's `.pi` extensions never execute, and its agents/skills/settings are not picked up. Combined with `isolation: "worktree"`, the worktree is created *from* the target directory's repo, the agent works at the equivalent subdirectory inside the copy (a monorepo-package cwd stays scoped to that package), and the resulting `pi-agent-*` branch lands in that repo — the completion message names it. On session end, worktree registrations are pruned in every repo that received one; only a hard crash can leave a stale entry (then: `git worktree prune` in the target repo). Agents with `memory:` keep reading/writing the parent project's memory.
 
@@ -934,6 +943,7 @@ docs/                 # Long-form guides (shipped to npm; README links out to th
   workflows.md        # SubagentWorkflow: writing, editing, saving and re-running scripts
   rpc.md              # Cross-extension integration: pi.events, subagents:rpc:*, manager registry
 examples/
+  agents/             # Copyable Explore and Plan custom definitions (not built-ins)
   workflows/          # Runnable examples, executed by test/workflow-examples.test.ts
   agent-tool-description.md
 test/                 # vitest suite; e2e/ and perf/ subdirectories
@@ -942,7 +952,7 @@ src/
   types.ts            # Type definitions (AgentConfig, AgentRecord, etc.)
 
   # Agent registry
-  default-agents.ts   # Embedded default agent configs (general-purpose, Explore, Plan)
+  default-agents.ts   # Embedded general-purpose agent config
   custom-agents.ts    # Load user-defined agents from .pi/agents/, .agents/agents/, and global agents
   agent-types.ts      # Unified agent registry (defaults + user), tool name resolution
   agent-file-toggle.ts # Locate/edit an agent's .md: enabled: toggle, eject to frontmatter
@@ -961,6 +971,7 @@ src/
   # Invocation surface
   invocation-config.ts # Shared tool-parameter schemas (isolation, join, thinking, ...)
   model-resolver.ts   # Model resolution: exact provider/modelId with fuzzy fallback
+  general-purpose-model.ts # Shared embedded general-purpose model default and exact resolution
   enabled-models.ts   # Read pi's enabledModels settings (project over global)
   model-scope.ts      # scopeModels allowlist policy, shared by top-level and nested tools
   mention.ts          # `@handle message` grammar: suggestion triggers and send parsing

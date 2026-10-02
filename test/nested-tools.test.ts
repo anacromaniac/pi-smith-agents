@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAvailableTypes, registerAgents, setFallbackSubagent } from "../src/agent-types.js";
 import { loadCustomAgents } from "../src/custom-agents.js";
+import { setGeneralPurposeModel } from "../src/general-purpose-model.js";
 import { setScopeModelsEnabled } from "../src/model-scope.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager, setMaxSubagentDepth } from "../src/nested-tools.js";
 import { encodeCwd } from "../src/output-file.js";
@@ -85,11 +86,43 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setGeneralPurposeModel(null);
   setScopeModelsEnabled(false);
   rmSync(cwd, { recursive: true, force: true });
 });
 
 describe("child-safe nested Agent tools", () => {
+  it("uses the configured model for built-in general-purpose", async () => {
+    setGeneralPurposeModel("anthropic/allowed");
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "general-purpose", description: "configured child", prompt: "Do work",
+    });
+    expect(result.isError).toBe(false);
+    expect(spawnAndWait.mock.calls[0]?.[4].model).toEqual({ provider: "anthropic", id: "allowed" });
+  });
+
+  it("rejects unavailable configured models before spawning", async () => {
+    setGeneralPurposeModel("anthropic/missing");
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "general-purpose", description: "configured child", prompt: "Do work",
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Configured generalPurposeModel is unavailable");
+    expect(spawnAndWait).not.toHaveBeenCalled();
+  });
+
+  it("lets an explicit model override an unavailable configured default", async () => {
+    setGeneralPurposeModel("anthropic/missing");
+    const [agent] = tools();
+    const result = await execute(agent, {
+      subagent_type: "general-purpose", description: "explicit child", prompt: "Do work", model: "anthropic/blocked",
+    });
+    expect(result.isError).toBe(false);
+    expect(spawnAndWait.mock.calls[0]?.[4].model).toEqual({ provider: "anthropic", id: "blocked" });
+  });
+
   it("allows any enabled agent when allowed_subagents is omitted", async () => {
     const [agent] = tools();
     const result = await execute(agent, {

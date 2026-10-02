@@ -38,6 +38,12 @@ export interface SubagentsSettings {
    * `/agents` → Settings input prompt explicitly says "0 = unlimited".
    */
   defaultMaxTurns?: number;
+  /**
+   * Default model for the built-in general-purpose agent: exact provider/modelId.
+   * Defaults to null (inherit the parent model). Project null clears a global
+   * default; omission inherits it. An explicit call model overrides this default.
+   */
+  generalPurposeModel?: string | null;
   graceTurns?: number;
   defaultJoinMode?: JoinMode;
   /**
@@ -101,8 +107,8 @@ export interface SubagentsSettings {
    */
   strictAgentFiles?: boolean;
   /**
-   * When true, the three built-in default agents (general-purpose, Explore, Plan)
-   * are not registered at startup. User-defined agents from project/global custom
+   * When true, the built-in general-purpose agent is not registered at startup.
+   * User-defined agents from project/global custom
    * agent dirs are completely unaffected — only the hardcoded DEFAULT_AGENTS are suppressed.
    * Defaults to false.
    */
@@ -311,6 +317,7 @@ export interface SettingsAppliers {
   setMaxConcurrent: (n: number) => void;
   setMaxConcurrentForeground: (n: number) => void;
   setDefaultMaxTurns: (n: number) => void;
+  setGeneralPurposeModel: (model: string | null) => void;
   setGraceTurns: (n: number) => void;
   setDefaultJoinMode: (mode: JoinMode) => void;
   setBackgroundByDefault: (b: boolean) => void;
@@ -392,6 +399,11 @@ function sanitize(raw: unknown): SubagentsSettings {
     (r.maxSubagentDepth as number) <= SUBAGENT_DEPTH_CEILING
   ) {
     out.maxSubagentDepth = r.maxSubagentDepth as number;
+  }
+  if (r.generalPurposeModel === null) {
+    out.generalPurposeModel = null;
+  } else if (typeof r.generalPurposeModel === "string" && r.generalPurposeModel.trim()) {
+    out.generalPurposeModel = r.generalPurposeModel.trim();
   }
   if (typeof r.defaultJoinMode === "string" && VALID_JOIN_MODES.has(r.defaultJoinMode)) {
     out.defaultJoinMode = r.defaultJoinMode as JoinMode;
@@ -516,6 +528,9 @@ export function applySettings(s: SubagentsSettings, appliers: SettingsAppliers):
     appliers.setMaxConcurrentForeground(s.maxConcurrentForeground);
   }
   if (typeof s.defaultMaxTurns === "number") appliers.setDefaultMaxTurns(s.defaultMaxTurns);
+  if (typeof s.generalPurposeModel === "string" || s.generalPurposeModel === null) {
+    appliers.setGeneralPurposeModel(s.generalPurposeModel);
+  }
   if (typeof s.graceTurns === "number") appliers.setGraceTurns(s.graceTurns);
   if (typeof s.maxSubagentDepth === "number") appliers.setMaxSubagentDepth(s.maxSubagentDepth);
   if (typeof s.fallbackSubagent === "string") appliers.setFallbackSubagent(s.fallbackSubagent);

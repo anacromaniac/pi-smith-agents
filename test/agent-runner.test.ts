@@ -138,6 +138,7 @@ import {
   setGraceTurns,
   setRememberAgents,
 } from "../src/agent-runner.js";
+import { getGeneralPurposeModel, setGeneralPurposeModel } from "../src/general-purpose-model.js";
 import { compileJsonSchema } from "../src/workflow/json-schema.js";
 
 /** The most recent session built by `createSession` — read by `lastToolsPassed()`. */
@@ -2670,6 +2671,72 @@ describe("agent-runner abort signal forwarding", () => {
     await runAgent(ctx, "Explore", "go", { pi });
 
     expect(session.abort).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent-runner generalPurposeModel selection", () => {
+  type RunnerModel = NonNullable<NonNullable<Parameters<typeof runAgent>[3]>["model"]>;
+  const parentModel = { provider: "anthropic", id: "parent-model" } as RunnerModel;
+  const configuredModel = { provider: "openai", id: "configured-model" } as RunnerModel;
+  const overrideModel = { provider: "anthropic", id: "override-model" } as RunnerModel;
+  let previousSetting: string | null;
+
+  beforeEach(() => {
+    previousSetting = getGeneralPurposeModel();
+    createAgentSession.mockResolvedValue({ session: createSession("OK").session });
+    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({ name: "general-purpose", isDefault: true }));
+  });
+
+  afterEach(() => setGeneralPurposeModel(previousSetting));
+
+  it("passes the available configured model instead of the parent to createAgentSession", async () => {
+    setGeneralPurposeModel("openai/configured-model");
+    const registry = {
+      find: vi.fn(() => configuredModel),
+      getAvailable: vi.fn(() => [configuredModel]),
+    };
+
+    await runAgent({ ...ctx, model: parentModel, modelRegistry: registry }, "general-purpose", "go", { pi });
+
+    expect(registry.find).toHaveBeenCalledWith("openai", "configured-model");
+    expect(createAgentSession.mock.calls[0][0].model).toBe(configuredModel);
+  });
+
+  it.each(["missing/unavailable", "not-canonical"])("uses an explicit model without resolving the invalid setting %s", async setting => {
+    setGeneralPurposeModel(setting);
+    const registry = { find: vi.fn(), getAvailable: vi.fn(() => []) };
+
+    await runAgent({ ...ctx, model: parentModel, modelRegistry: registry }, "general-purpose", "go", {
+      pi, model: overrideModel,
+    });
+
+    expect(createAgentSession.mock.calls[0][0].model).toBe(overrideModel);
+    expect(registry.getAvailable).not.toHaveBeenCalled();
+    expect(registry.find).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unavailable configured default before creating a session", async () => {
+    setGeneralPurposeModel("openai/configured-model");
+    const registry = { find: vi.fn(() => configuredModel), getAvailable: vi.fn(() => []) };
+
+    await expect(runAgent({ ...ctx, model: parentModel, modelRegistry: registry }, "general-purpose", "go", { pi }))
+      .rejects.toThrow('Configured generalPurposeModel is unavailable: "openai/configured-model"');
+
+    expect(createAgentSession).not.toHaveBeenCalled();
+  });
+
+  it("leaves a custom general-purpose agent's frontmatter model independent of the setting", async () => {
+    vi.mocked(getAgentConfig).mockReset();
+    vi.mocked(getAgentConfig).mockReturnValueOnce(makeAgentConfig({
+      name: "general-purpose", model: "anthropic/override-model", isDefault: false,
+    }));
+    setGeneralPurposeModel("missing/unavailable");
+    const registry = { find: vi.fn(() => overrideModel), getAvailable: vi.fn(() => [overrideModel]) };
+
+    await runAgent({ ...ctx, model: parentModel, modelRegistry: registry }, "general-purpose", "go", { pi });
+
+    expect(registry.find).toHaveBeenCalledWith("anthropic", "override-model");
+    expect(createAgentSession.mock.calls[0][0].model).toBe(overrideModel);
   });
 });
 
