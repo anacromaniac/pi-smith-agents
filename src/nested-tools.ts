@@ -16,6 +16,7 @@ import {
   resolveTypeIn,
 } from "./agent-types.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { resolveGeneralPurposeModel } from "./general-purpose-model.js";
 import { isolationParam, resolveAgentInvocationConfig } from "./invocation-config.js";
 import { resolveModel } from "./model-resolver.js";
 import { checkModelScope } from "./model-scope.js";
@@ -235,6 +236,12 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
           if (invocation.modelFromParams) return textResult(resolvedModel, true);
         } else {
           model = resolvedModel;
+        }
+      } else {
+        try {
+          model = resolveGeneralPurposeModel(config, ctx.modelRegistry) ?? model;
+        } catch (error) {
+          return textResult(error instanceof Error ? error.message : String(error), true);
         }
       }
 

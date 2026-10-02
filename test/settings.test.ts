@@ -95,6 +95,52 @@ describe("settings persistence", () => {
     expect(loadSettings(projectDir)).toEqual(settings);
   });
 
+  it.each(["anthropic/claude-sonnet-4-6", "claude-sonnet-4-6", "sonnet"])(
+    "loads and trims the general-purpose model spelling %s",
+    (model) => {
+      writeGlobal({ generalPurposeModel: `  ${model}  ` });
+      expect(loadSettings(projectDir)).toEqual({ generalPurposeModel: model });
+      writeProject({ generalPurposeModel: "  haiku  " });
+      expect(loadSettings(projectDir)).toEqual({ generalPurposeModel: "haiku" });
+    },
+  );
+
+  it("inherits the global general-purpose model when the project omits it", () => {
+    writeGlobal({ generalPurposeModel: "sonnet" });
+    writeProject({ maxConcurrent: 4 });
+    expect(loadSettings(projectDir)).toEqual({ generalPurposeModel: "sonnet", maxConcurrent: 4 });
+  });
+
+  it("lets project null explicitly clear the global general-purpose model", () => {
+    writeGlobal({ generalPurposeModel: "sonnet" });
+    writeProject({ generalPurposeModel: null });
+    expect(loadSettings(projectDir)).toEqual({ generalPurposeModel: null });
+  });
+
+  it("round-trips generalPurposeModel strings and null; absence stays absent", () => {
+    for (const model of ["sonnet", null]) {
+      expect(saveSettings({ generalPurposeModel: model }, projectDir)).toBe(true);
+      expect(loadSettings(projectDir)).toEqual({ generalPurposeModel: model });
+    }
+    saveSettings({}, projectDir);
+    expect(loadSettings(projectDir)).toEqual({});
+  });
+
+  it("drops invalid generalPurposeModel shapes without clearing the global default", () => {
+    writeGlobal({ generalPurposeModel: "sonnet" });
+    for (const invalid of ["", "   ", false, true, 42, [], {}]) {
+      writeProject({ generalPurposeModel: invalid });
+      expect(loadSettings(projectDir)).toEqual({ generalPurposeModel: "sonnet" });
+    }
+  });
+
+  it("keeps nonempty unavailable model names for runtime validation", () => {
+    writeProject({ generalPurposeModel: "  unavailable-provider/unavailable-model  " });
+    expect(loadSettings(projectDir)).toEqual({
+      generalPurposeModel: "unavailable-provider/unavailable-model",
+    });
+  });
+
   it("round-trips schedulingEnabled (true and false), and absence stays absent", () => {
     saveSettings({ schedulingEnabled: false }, projectDir);
     expect(loadSettings(projectDir)).toEqual({ schedulingEnabled: false });
@@ -535,6 +581,7 @@ describe("settings persistence", () => {
         setMaxConcurrent: vi.fn(),
         setMaxConcurrentForeground: vi.fn(),
         setDefaultMaxTurns: vi.fn(),
+        setGeneralPurposeModel: vi.fn(),
         setGraceTurns: vi.fn(),
         setDefaultJoinMode: vi.fn(),
         setBackgroundByDefault: vi.fn(),
@@ -601,6 +648,15 @@ describe("settings persistence", () => {
       expect(appliers.setScopeModels).not.toHaveBeenCalled();
       expect(appliers.setDisableDefaultAgents).not.toHaveBeenCalled();
       expect(appliers.setToolDescriptionMode).not.toHaveBeenCalled();
+    });
+
+    it("applies generalPurposeModel strings and null, but leaves absence unchanged", () => {
+      applySettings({ generalPurposeModel: "anthropic/claude-sonnet-4-6" }, appliers);
+      expect(appliers.setGeneralPurposeModel).toHaveBeenCalledWith("anthropic/claude-sonnet-4-6");
+      applySettings({ generalPurposeModel: null }, appliers);
+      expect(appliers.setGeneralPurposeModel).toHaveBeenLastCalledWith(null);
+      applySettings({}, appliers);
+      expect(appliers.setGeneralPurposeModel).toHaveBeenCalledTimes(2);
     });
 
     it("applies fallbackSubagent through to the registry", () => {
@@ -786,6 +842,7 @@ describe("settings persistence", () => {
         setMaxConcurrent: vi.fn(),
         setMaxConcurrentForeground: vi.fn(),
         setDefaultMaxTurns: vi.fn(),
+        setGeneralPurposeModel: vi.fn(),
         setGraceTurns: vi.fn(),
         setDefaultJoinMode: vi.fn(),
         setBackgroundByDefault: vi.fn(),
@@ -828,6 +885,18 @@ describe("settings persistence", () => {
       expect(result).toEqual({ maxConcurrent: 16, graceTurns: 7 });
     });
 
+    it("applies and emits a project null that clears the global general-purpose model", () => {
+      writeGlobal({ generalPurposeModel: "anthropic/claude-sonnet-4-6" });
+      writeProject({ generalPurposeModel: null });
+      const emit = vi.fn();
+
+      expect(applyAndEmitLoaded(appliers, emit, projectDir)).toEqual({ generalPurposeModel: null });
+      expect(appliers.setGeneralPurposeModel).toHaveBeenCalledWith(null);
+      expect(emit).toHaveBeenCalledWith("subagents:settings_loaded", {
+        settings: { generalPurposeModel: null },
+      });
+    });
+
     it("still emits the event when both files are missing (payload carries {})", () => {
       const emit = vi.fn();
 
@@ -846,7 +915,7 @@ describe("settings persistence", () => {
   describe("saveAndEmitChanged", () => {
     it("persists, emits with persisted=true, and returns info toast on success", () => {
       const emit = vi.fn();
-      const snapshot = { maxConcurrent: 5, graceTurns: 2 };
+      const snapshot = { maxConcurrent: 5, graceTurns: 2, generalPurposeModel: "sonnet" };
 
       const toast = saveAndEmitChanged(snapshot, "Max concurrency set to 5", emit, projectDir);
 

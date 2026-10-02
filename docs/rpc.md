@@ -16,7 +16,7 @@ For the channel list, the reply envelope, the per-channel snippets and the event
 |---|---|---|
 | `description` | string | What the agent is doing. Shown in the widget, FleetView and the completion notification |
 | `name` | string | A memorable second handle (`@auth-audit`). Slugged, never validated — anything unusable degrades rather than failing the spawn |
-| `model` | `Model` **or** `"provider/modelId"` | Strings are resolved at the RPC boundary against `ctx.modelRegistry`. `null` means inherit, not override. Resolution is fuzzy — see [Model Scope](../README.md#model-scope) |
+| `model` | `Model` **or** `"provider/modelId"` | Strings are resolved at the RPC boundary against `ctx.modelRegistry`. `null` means unset, not override. Resolution of caller-supplied strings is fuzzy — see [Model Scope](../README.md#model-scope) |
 | `maxTurns` | number | Turn ceiling for the run |
 | `isolated` | boolean | Strips extensions, skills and nested tools. **Not** a git worktree — see the trap table below |
 | `inheritContext` | boolean | Fork the parent conversation into the child |
@@ -29,6 +29,10 @@ For the channel list, the reply envelope, the per-channel snippets and the event
 | `invocation` | AgentInvocation | Resolved snapshot used for UI display |
 | `signal` | AbortSignal | Aborting it stops the subagent |
 | `onSpawned` / `onQueued` / `onCompaction` / `onBeforeWorktreeCleanup` | functions | Fire as documented on `SpawnOptions` |
+
+Only `general-purpose` is built in. `Explore` and `Plan` require installing the [custom examples](../README.md#default-agent-types); without them, these names follow the configured unknown-type fallback policy.
+
+For embedded `general-purpose`, `options.model` takes precedence over `generalPurposeModel`, then the parent session model. A missing or `null` option does not clear the configured default. The setting requires an exact available `provider/modelId` with configured credentials; an unavailable configured model fails the spawn without fuzzy or provider fallback. Custom definitions, including a `general-purpose` override, are unaffected. Set `generalPurposeModel: null` in project `subagents.json` to clear a global default and inherit the parent.
 
 **Silently stripped** — set these and nothing happens, with no error and no note. Each deletion is a deliberate guard, and the reasons are worth knowing because they say what the surface refuses to let a caller forge:
 

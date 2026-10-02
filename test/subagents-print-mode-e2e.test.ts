@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Context } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { exampleAgentFiles } from "./helpers/example-agents.js";
 import {
   agentCall,
   agentToolCalls,
@@ -266,6 +267,33 @@ describe.skipIf(LIVE)("subagents print-mode e2e (scripted faux, real pi-mono)", 
     expect(conversationText(run.parentSession)).not.toContain("\u001b");
   });
 
+  it("dispatches the explicitly installed Explore example with its read-only prompt and tools", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "subagents-explore-example-"));
+    tmpDirs.push(cwd);
+    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "agents", "Explore.md"), exampleAgentFiles.Explore);
+
+    run = await runPrintMode({
+      cwd,
+      prompt: "Delegate the search to Explore.",
+      respond: routeBySession({
+        parentInitial: agentCall({
+          subagent_type: "Explore", description: "search", prompt: "Find files.", run_in_background: false,
+        }),
+        parentFinal: "Done.",
+        subagent: (context: Context) => {
+          const readOnlyPrompt = context.systemPrompt?.includes("file search specialist");
+          const toolNames = (context.tools ?? []).map(tool => tool.name);
+          const readOnlyTools = toolNames.includes("read") && !toolNames.includes("edit") && !toolNames.includes("write");
+          return readOnlyPrompt && readOnlyTools ? "EXPLORE_EXAMPLE_LOADED" : "EXAMPLE_MISSING";
+        },
+      }),
+    });
+
+    expect(agentToolResults(run.parentSession)[0]).toContain("EXPLORE_EXAMPLE_LOADED");
+    expect(agentToolResults(run.parentSession)[0]).not.toContain("EXAMPLE_MISSING");
+  });
+
   it("errors clearly when faux mode is given no script", async () => {
     await expect(runPrintMode({ prompt: "x" })).rejects.toThrow(/provide `respond` or `steps`/);
   });
@@ -306,9 +334,19 @@ const SELF_SMOKE_VITEST_TIMEOUT = SELF_SMOKE_TIMEOUT + VITEST_SLACK;
 
 describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
   let run: PrintModeRun | undefined;
+  const exampleDirs: string[] = [];
+  function installExploreExample(): string {
+    const cwd = mkdtempSync(join(tmpdir(), "subagents-live-explore-"));
+    exampleDirs.push(cwd);
+    mkdirSync(join(cwd, ".pi", "agents"), { recursive: true });
+    writeFileSync(join(cwd, ".pi", "agents", "Explore.md"), exampleAgentFiles.Explore);
+    return cwd;
+  }
+
   afterEach(async () => {
     await run?.dispose();
     run = undefined;
+    for (const cwd of exampleDirs.splice(0)) rmSync(cwd, { recursive: true, force: true });
   });
 
   it(
@@ -355,6 +393,7 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
     "Explore subagent_type — model dispatches a non-default agent type",
     async () => {
       run = await runPrintMode({
+        cwd: installExploreExample(),
         prompt:
           "Use the Agent tool with subagent_type 'Explore' to look at the current working " +
           "directory and report a one-line summary of what's there.",
@@ -377,6 +416,7 @@ describe.runIf(LIVE)("subagents print-mode e2e (live LLM, opt-in)", () => {
       // Agent capabilities in a single session and self-reports. We then assert it
       // genuinely invoked each feature (not just that it claimed to in prose).
       run = await runPrintMode({
+        cwd: installExploreExample(),
         prompt: [
           "You are smoke-testing your own Agent toolset. Do these steps IN ORDER, then print a",
           "final report with one PASS/FAIL line per step:",

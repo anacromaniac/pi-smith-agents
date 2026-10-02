@@ -21,7 +21,7 @@ import {
   setFallbackSubagent,
 } from "../src/agent-types.js";
 import { DEFAULT_AGENTS } from "../src/default-agents.js";
-import type { AgentConfig } from "../src/types.js";
+import { type AgentConfig, DEFAULT_AGENT_NAMES } from "../src/types.js";
 
 function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
@@ -45,10 +45,21 @@ describe("agent type registry", () => {
   });
 
   describe("default agents", () => {
-    it("recognizes all default agent types", () => {
+    it("embeds only general-purpose", () => {
+      expect([...DEFAULT_AGENTS.keys()]).toEqual(["general-purpose"]);
+      expect(DEFAULT_AGENT_NAMES).toEqual(["general-purpose"]);
+      expect(getAvailableTypes()).toEqual(["general-purpose"]);
       expect(isValidType("general-purpose")).toBe(true);
-      expect(isValidType("Explore")).toBe(true);
-      expect(isValidType("Plan")).toBe(true);
+      expect(isValidType("Explore")).toBe(false);
+      expect(isValidType("Plan")).toBe(false);
+    });
+
+    it.each(["Explore", "Plan"])("falls back from the removed %s type to general-purpose", (name) => {
+      expect(getAgentConfig(name)).toBeUndefined();
+      expect(resolveSpawnType(name)).toEqual({
+        ok: true, type: "general-purpose", fellBackFrom: name,
+      });
+      expect(getConfig(name)).toEqual(getConfig("general-purpose"));
     });
 
     it("does not include removed agents", () => {
@@ -62,21 +73,19 @@ describe("agent type registry", () => {
     });
 
     it("case-insensitive lookup works for isValidType", () => {
-      expect(isValidType("explore")).toBe(true);
-      expect(isValidType("EXPLORE")).toBe(true);
       expect(isValidType("General-Purpose")).toBe(true);
-      expect(isValidType("plan")).toBe(true);
+      expect(isValidType("GENERAL-PURPOSE")).toBe(true);
     });
 
     it("case-insensitive lookup works for getAgentConfig", () => {
-      const config = getAgentConfig("explore");
-      expect(config?.name).toBe("Explore");
+      const config = getAgentConfig("GENERAL-PURPOSE");
+      expect(config?.name).toBe("general-purpose");
       expect(config?.model).toBeUndefined();
     });
 
     it("resolveType returns canonical key or undefined", () => {
-      expect(resolveType("Explore")).toBe("Explore");
-      expect(resolveType("explore")).toBe("Explore");
+      expect(resolveType("Explore")).toBeUndefined();
+      expect(resolveType("explore")).toBeUndefined();
       expect(resolveType("GENERAL-PURPOSE")).toBe("general-purpose");
       expect(resolveType("nonexistent")).toBeUndefined();
     });
@@ -89,18 +98,6 @@ describe("agent type registry", () => {
       expect(config.skills).toBe(true);
     });
 
-    it("Explore has read-only tools", () => {
-      const config = getConfig("Explore");
-      expect(config.builtinToolNames).toEqual(["read", "bash", "grep", "find", "ls"]);
-      expect(config.builtinToolNames).not.toContain("edit");
-      expect(config.builtinToolNames).not.toContain("write");
-    });
-
-    it("Explore inherits the parent model (no model pin)", () => {
-      const cfg = getAgentConfig("Explore");
-      expect(cfg?.model).toBeUndefined();
-    });
-
     it("default agents are marked isDefault", () => {
       const cfg = getAgentConfig("general-purpose");
       expect(cfg?.isDefault).toBe(true);
@@ -110,7 +107,7 @@ describe("agent type registry", () => {
     // An explicit `false` here would silently win over the caller's `true` via `??` in
     // resolveAgentInvocationConfig, breaking documented Agent tool params.
     it("default agents do not lock strategy fields (run_in_background / inherit_context / isolated)", () => {
-      for (const name of ["general-purpose", "Explore", "Plan"]) {
+      for (const name of DEFAULT_AGENTS.keys()) {
         const cfg = getAgentConfig(name);
         expect(cfg?.runInBackground, `${name}.runInBackground`).toBeUndefined();
         expect(cfg?.inheritContext, `${name}.inheritContext`).toBeUndefined();
@@ -118,9 +115,9 @@ describe("agent type registry", () => {
       }
     });
 
-    // All default agents inherit the parent session model — none pins its own.
+    // Model defaults are resolved separately; embedded definitions do not pin one.
     it("default agents do not pin a model", () => {
-      for (const name of ["general-purpose", "Explore", "Plan"]) {
+      for (const name of DEFAULT_AGENTS.keys()) {
         const cfg = getAgentConfig(name);
         expect(cfg?.model, `${name}.model`).toBeUndefined();
       }
@@ -128,9 +125,7 @@ describe("agent type registry", () => {
 
     it("getDefaultAgentNames returns default agent names", () => {
       const names = getDefaultAgentNames();
-      expect(names).toContain("general-purpose");
-      expect(names).toContain("Explore");
-      expect(names).toContain("Plan");
+      expect(names).toEqual(["general-purpose"]);
     });
 
     it("BUILTIN_TOOL_NAMES includes all built-in tools", () => {
@@ -182,9 +177,7 @@ describe("agent type registry", () => {
 
       setDefaultsDisabled(false);
       registerAgents(new Map());
-      expect(isValidType("general-purpose")).toBe(true);
-      expect(isValidType("Explore")).toBe(true);
-      expect(isValidType("Plan")).toBe(true);
+      expect(getAvailableTypes()).toEqual(["general-purpose"]);
     });
 
     it("getConfig falls back to the hardcoded config when defaults are disabled and no user agents exist", () => {
@@ -213,7 +206,7 @@ describe("agent type registry", () => {
 
       const types = getAvailableTypes();
       expect(types).toContain("general-purpose");
-      expect(types).toContain("Explore");
+      expect(types).not.toContain("Explore");
       expect(types).toContain("auditor");
     });
 
@@ -299,15 +292,15 @@ describe("agent type registry", () => {
     });
 
     it("user agent overrides default with same name", () => {
-      const agents = new Map([["Explore", makeAgentConfig({
-        name: "Explore",
-        description: "Custom Explore",
+      const agents = new Map([["general-purpose", makeAgentConfig({
+        name: "general-purpose",
+        description: "Custom general-purpose",
         builtinToolNames: BUILTIN_TOOL_NAMES,
       })]]);
       registerAgents(agents);
 
-      const config = getConfig("Explore");
-      expect(config.description).toBe("Custom Explore");
+      const config = getConfig("general-purpose");
+      expect(config.description).toBe("Custom general-purpose");
       expect(config.builtinToolNames).toEqual(BUILTIN_TOOL_NAMES);
     });
 

@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import subagentsExtension from "../src/index.js";
 import { setWorktreeIsolationEnabled } from "../src/worktree.js";
+import { exampleAgentFiles } from "./helpers/example-agents.js";
 
 const EXAMPLE_TEMPLATE = fileURLToPath(new URL("../examples/agent-tool-description.md", import.meta.url));
 
@@ -50,7 +51,7 @@ describe("toolDescriptionMode", () => {
   let prevHome: string | undefined;
   let shutdown: (() => Promise<void>) | undefined;
 
-  function setup(settings?: Record<string, unknown>, beforeInstantiate?: () => void) {
+  function setup(settings?: Record<string, unknown>, beforeInstantiate?: () => void, withExamples = false) {
     tmpDir = mkdtempSync(join(tmpdir(), "pi-tooldesc-"));
     // Isolate global settings (getAgentDir / ~/.pi) so the dev's real
     // subagents.json can't leak into the "default is full" assertion.
@@ -63,6 +64,12 @@ describe("toolDescriptionMode", () => {
     mkdirSync(join(tmpDir, ".pi"), { recursive: true });
     if (settings) {
       writeFileSync(join(tmpDir, ".pi", "subagents.json"), JSON.stringify(settings));
+    }
+    if (withExamples) {
+      mkdirSync(join(tmpDir, ".pi", "agents"), { recursive: true });
+      for (const [name, content] of Object.entries(exampleAgentFiles)) {
+        writeFileSync(join(tmpDir, ".pi", "agents", `${name}.md`), content);
+      }
     }
     beforeInstantiate?.();
     process.chdir(tmpDir);
@@ -97,12 +104,19 @@ describe("toolDescriptionMode", () => {
     const desc: string = tools.get("Agent").description;
     expect(desc).toContain("## Usage notes");
     expect(desc).toContain("## Writing the prompt");
-    // Full agent descriptions are embedded (a late Explore sentence survives).
+    expect(desc).toContain("- general-purpose:");
+    expect(desc).not.toContain("- Explore:");
+    expect(desc).not.toContain("- Plan:");
+  });
+
+  it("embeds the full description of explicitly installed example agents", () => {
+    const desc: string = setup(undefined, undefined, true).get("Agent").description;
+    expect(desc).toContain("- Explore:");
     expect(desc).toContain("very thorough");
   });
 
   it("compact mode swaps in the short description with one-line type list", () => {
-    const tools = setup({ toolDescriptionMode: "compact" });
+    const tools = setup({ toolDescriptionMode: "compact" }, undefined, true);
     const desc: string = tools.get("Agent").description;
     expect(desc).toContain("Launch an autonomous agent");
     expect(desc).not.toContain("## Usage notes");
@@ -191,7 +205,7 @@ describe("toolDescriptionMode", () => {
   it("custom mode falls back to the global file when no project file exists", () => {
     const tools = setup({ toolDescriptionMode: "custom" }, () => {
       writeFileSync(join(hermeticAgentDir, "agent-tool-description.md"), "GLOBAL CUSTOM\n{{compactTypeList}}");
-    });
+    }, true);
     const desc: string = tools.get("Agent").description;
     expect(desc).toContain("GLOBAL CUSTOM");
     expect(desc).toContain("- Explore: Fast read-only search agent for locating code. (Tools:");

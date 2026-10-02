@@ -1,7 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getAgentConfig, registerAgents } from "../src/agent-types.js";
+import { loadCustomAgents } from "../src/custom-agents.js";
 import { buildAgentPrompt } from "../src/prompts.js";
 import type { AgentConfig, EnvInfo } from "../src/types.js";
+import { type Hermetic, hermeticDir } from "./helpers/boot-extension.js";
+import { exampleAgentFiles } from "./helpers/example-agents.js";
 
 const env: EnvInfo = {
   isGitRepo: true,
@@ -15,10 +18,12 @@ const envNoGit: EnvInfo = {
   platform: "linux",
 };
 
-// Initialize default agents
+let hermetic: Hermetic;
 beforeEach(() => {
-  registerAgents(new Map());
+  hermetic = hermeticDir({ agentFiles: exampleAgentFiles });
+  registerAgents(loadCustomAgents(hermetic.dir));
 });
+afterEach(() => hermetic.restore());
 
 function getDefaultConfig(name: string): AgentConfig {
   return getAgentConfig(name)!;

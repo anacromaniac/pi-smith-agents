@@ -36,6 +36,7 @@ import { existsSync } from "node:fs";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AgentManager } from "../agent-manager.js";
 import { getAgentConfig, resolveSpawnType } from "../agent-types.js";
+import { resolveGeneralPurposeModel } from "../general-purpose-model.js";
 import { resolveModel } from "../model-resolver.js";
 import { checkModelScope } from "../model-scope.js";
 import type { AgentRecord, ThinkingLevel } from "../types.js";
@@ -197,10 +198,8 @@ export function createWorkflowHost(deps: WorkflowHostOptions): WorkflowHost {
       const dispatch = resolveSpawnType(request.agentType);
       if (!dispatch.ok) return { ok: false, error: dispatch.message };
 
-      // Same precedence as the Agent tool: the caller's model wins, the agent
-      // definition's is next, and the parent's is the floor. A model the script
-      // named and we cannot resolve is an error; one the definition named falls
-      // back to the parent silently, because the script never asked for it.
+      // Workflow calls override agent model pins; ordinary Agent calls do not.
+      // Unresolvable custom pins retain their existing parent fallback.
       let model = ctx.model;
       const config = getAgentConfig(dispatch.type);
       const modelInput = request.model ?? config?.model;
@@ -210,6 +209,12 @@ export function createWorkflowHost(deps: WorkflowHostOptions): WorkflowHost {
           if (request.model !== undefined) return { ok: false, error: resolved };
         } else {
           model = resolved;
+        }
+      } else {
+        try {
+          model = resolveGeneralPurposeModel(config, ctx.modelRegistry) ?? model;
+        } catch (error) {
+          return { ok: false, error: error instanceof Error ? error.message : String(error) };
         }
       }
 

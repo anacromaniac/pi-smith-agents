@@ -22,6 +22,7 @@ import { runInChildSessionContext } from "./child-context.js";
 import { buildParentContext, extractText } from "./context.js";
 import { DEFAULT_AGENTS } from "./default-agents.js";
 import { detectEnv } from "./env.js";
+import { resolveGeneralPurposeModel } from "./general-purpose-model.js";
 import { buildMemoryBlock, buildReadOnlyMemoryBlock } from "./memory.js";
 import { createNestedSubagentTools, getMaxSubagentDepth, type NestedAgentManager } from "./nested-tools.js";
 import { buildAgentPrompt, type PromptExtras } from "./prompts.js";
@@ -615,6 +616,9 @@ export async function runAgent(
 ): Promise<RunResult> {
   const config = getConfig(type);
   const agentConfig = getAgentConfig(type);
+  const model = options.model
+    ?? resolveGeneralPurposeModel(agentConfig, ctx.modelRegistry)
+    ?? resolveDefaultModel(ctx.model, ctx.modelRegistry, agentConfig?.model);
 
   // Resolve working directory: worktree override > parent cwd
   const effectiveCwd = options.cwd ?? ctx.cwd;
@@ -827,11 +831,6 @@ export async function runAgent(
       }
     }
   }
-
-  // Resolve model: explicit option > config.model > parent model
-  const model = options.model ?? resolveDefaultModel(
-    ctx.model, ctx.modelRegistry, agentConfig?.model,
-  );
 
   // Resolve thinking level: explicit option > agent config > undefined (inherit)
   const thinkingLevel = options.thinkingLevel ?? agentConfig?.thinking;

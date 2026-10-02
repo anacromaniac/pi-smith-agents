@@ -24,6 +24,7 @@ import { BUILTIN_TOOL_NAMES, getAgentConfig, getAllTypes, getAvailableTypes, get
 import { inChildSessionContext } from "./child-context.js";
 import { type RpcHandle, registerRpcHandlers } from "./cross-extension-rpc.js";
 import { loadCustomAgents } from "./custom-agents.js";
+import { getGeneralPurposeModel, resolveGeneralPurposeModel, setGeneralPurposeModel } from "./general-purpose-model.js";
 import { GroupJoinManager } from "./group-join.js";
 import { isolationParam, resolveAgentInvocationConfig, resolveJoinMode } from "./invocation-config.js";
 import { describeMention, handleBase, isReservedHandle, parseMention, resolveHandleToType, stripAgentPrefix } from "./mention.js";
@@ -1201,8 +1202,8 @@ export default function (pi: ExtensionAPI) {
   }
 
   // ---- Disable default agents configuration ----
-  // When enabled, the three hardcoded default agents (general-purpose, Explore,
-  // Plan) are not registered. User-defined agents from project/global custom
+  // When enabled, the hardcoded general-purpose agent is not registered.
+  // User-defined agents from project/global custom
   // agent dirs are completely unaffected — only DEFAULT_AGENTS are suppressed.
   // Defaults to false; opt-in via `/agents → Settings` or subagents.json.
   // State lives in agent-types.ts (isDefaultsDisabled) because registerAgents
@@ -1405,6 +1406,7 @@ export default function (pi: ExtensionAPI) {
       setMaxConcurrent: (n) => manager.setMaxConcurrent(n),
       setMaxConcurrentForeground: (n) => manager.setMaxConcurrentForeground(n),
       setDefaultMaxTurns,
+      setGeneralPurposeModel,
       setGraceTurns,
       setDefaultJoinMode,
       setBackgroundByDefault,
@@ -1585,7 +1587,7 @@ Terse command-style prompts produce shallow, generic work.
     promptSnippet: "Launch autonomous sub-agents for complex multi-step tasks",
     promptGuidelines: [
       "Use Agent with specialized agents when the task matches an agent type's description. Subagents are valuable for parallelizing independent queries or for protecting the main context window from excessive results, but should not be used excessively when not needed. Importantly, avoid duplicating work that subagents are already doing — if you delegate research to a subagent, do not also perform the same searches yourself.",
-      "For broad codebase exploration or research, spawn Agent with an appropriate subagent_type (e.g. Explore). Otherwise use direct tools (read, grep, find) when the target is already known.",
+      "For broad codebase exploration or research, spawn Agent with an available custom specialized subagent_type or general-purpose. Otherwise use direct tools (read, grep, find) when the target is already known.",
       "When an agent runs in the background, you will be notified on completion — do not poll or sleep waiting for it. Continue with other work instead.",
       "Trust but verify: an agent's summary describes intent, not outcome. When an agent writes or edits code, check the actual changes before reporting work as done.",
     ],
@@ -1816,6 +1818,12 @@ Terse command-style prompts produce shallow, generic work.
           // config-specified: silent fallback to parent
         } else {
           model = resolved;
+        }
+      } else if (!params.resume) {
+        try {
+          model = resolveGeneralPurposeModel(customConfig, ctx.modelRegistry) ?? model;
+        } catch (err) {
+          return textResult(err instanceof Error ? err.message : String(err));
         }
       }
 
@@ -3443,6 +3451,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
       // 0 = unlimited — per SubagentsSettings.defaultMaxTurns docstring and
       // normalizeMaxTurns() in agent-runner.ts (which maps 0 → undefined).
       defaultMaxTurns: getDefaultMaxTurns() ?? 0,
+      generalPurposeModel: getGeneralPurposeModel(),
       graceTurns: getGraceTurns(),
       defaultJoinMode: getDefaultJoinMode(),
       backgroundByDefault: getBackgroundByDefault(),
@@ -3591,7 +3600,7 @@ Write the file using the write tool. Only write the file, nothing else.`;
         {
           id: "disableDefaultAgents",
           label: "Disable defaults",
-          description: "Hide built-in agents (general-purpose, Explore, Plan) — custom agents are unaffected",
+          description: "Hide the built-in general-purpose agent — custom agents are unaffected",
           currentValue: isDefaultsDisabled() ? "on" : "off",
           values: ["on", "off"],
         },
