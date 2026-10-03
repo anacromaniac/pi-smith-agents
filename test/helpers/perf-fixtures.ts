@@ -230,28 +230,6 @@ export function mountWidget(
   };
 }
 
-/** Drive `FleetList`: same idea, but its widget renders at an explicit width. */
-export function mountFleet(FleetList: any, records: unknown[]) {
-  const fleet = new FleetList(makeManager(records), makeActivity(records as { id: string; toolUses: number }[]));
-  let factory: any;
-  fleet.setUICtx({
-    setWidget: (_key: string, content: any) => { factory = content; },
-    onTerminalInput: () => () => {},
-    getEditorText: () => "",
-    notify: () => {},
-    custom: () => new Promise(() => {}),
-  });
-  fleet.update();
-  const tui = perfTui();
-  factory?.(tui, perfTheme).render(120); // prime, as above
-  return {
-    fleet,
-    render: (width = 120): string[] => (factory ? factory(tui, perfTheme).render(width) : []),
-    update: () => fleet.update(),
-    dispose: () => fleet.dispose?.(),
-  };
-}
-
 /** Construct a `ConversationViewer` over a synthetic session. */
 export function mountViewer(
   Viewer: any,

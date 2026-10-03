@@ -178,7 +178,8 @@ describe("issue #142: RPC handlers + subagents:ready are gated on session_start"
           expect.any(Function),
           { placement: "aboveEditor" },
         );
-        expect(activeCtx.ui.setStatus).toHaveBeenCalledWith("subagents", "1 running agent");
+        expect(activeCtx.ui.setStatus).not.toHaveBeenCalled();
+        expect(activeCtx.ui.onTerminalInput).not.toHaveBeenCalled();
       });
     } finally {
       await lifecycle.get("session_shutdown")();

@@ -17,6 +17,7 @@ import {
   failWorkflowTask,
   pauseWorkflowTask,
   resumeWorkflowTask,
+  updateWorkflowProgressBatch,
   type WorkflowTask,
 } from "../src/workflow/task.js";
 
@@ -36,6 +37,28 @@ function runningTask(): { task: WorkflowTask; control: ReturnType<typeof stubCon
   task.control = control;
   return { task, control };
 }
+
+describe("cached workflow children", () => {
+  it("starts empty and replaces duplicate indices once per batch", () => {
+    const { task } = runningTask();
+    expect(task.agentEntries).toEqual([]);
+    updateWorkflowProgressBatch(task, [
+      { type: "workflow_agent", index: 1, label: "older", state: "progress", tokens: 20 },
+      { type: "workflow_agent", index: 0, label: "first", state: "done", tokens: 10 },
+      { type: "workflow_agent", index: 1, label: "latest", state: "done", tokens: 30 },
+    ]);
+    expect(task.agentEntries.map(entry => entry.label)).toEqual(["first", "latest"]);
+    expect(task.totalTokens).toBe(40);
+    expect(task.doneCount).toBe(2);
+    const cached = task.agentEntries;
+    updateWorkflowProgressBatch(task, []);
+    expect(task.agentEntries).toBe(cached);
+    updateWorkflowProgressBatch(task, [{ type: "workflow_agent", index: 1, label: "retried", state: "progress", tokens: 5 }]);
+    expect(task.agentEntries.map(entry => entry.label)).toEqual(["first", "retried"]);
+    expect(task.totalTokens).toBe(15);
+    expect(task.doneCount).toBe(1);
+  });
+});
 
 describe("pausing a run", () => {
   it("tells the run to hold, not just the record", () => {
