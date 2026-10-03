@@ -78,9 +78,9 @@ export function extensionCanonicalName(extPath: string): string {
  *     stop before reading a consumer's or parent package's manifest.
  * The name is then taken only when that root's `pi.extensions` manifest actually
  * lists this entry. That "declares this entry" check is deliberate: our own test
- * fixtures live under this repo, whose root manifest declares `./src/index.ts`
- * as `@tintinweb/pi-subagents`, so a looser rule would misattribute every
- * co-located file to `pi-subagents`.
+ * fixtures live under this repo, whose root manifest declares the extension as
+ * `pi-smith-agents`, so a looser rule would misattribute every co-located file
+ * to it.
  */
 function extensionPackageName(extPath: string): string | undefined {
   const entry = resolve(extPath);

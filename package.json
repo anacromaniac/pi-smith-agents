@@ -1,16 +1,17 @@
 {
-  "name": "@tintinweb/pi-subagents",
+  "name": "pi-smith-agents",
   "version": "0.19.0",
   "description": "A pi extension that brings Claude Code-like sub-agents and workflow orchestration to pi — parallel execution, passive agents/workflows widget, custom agent types, mid-run steering, dynamic workflows, Claude Code compatibility, look and feel.",
-  "author": "tintinweb",
+  "author": "anacromaniac",
+  "contributors": ["tintinweb"],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tintinweb/pi-subagents.git"
+    "url": "https://github.com/anacromaniac/pi-smith-agents.git"
   },
-  "homepage": "https://github.com/tintinweb/pi-subagents#readme",
+  "homepage": "https://github.com/anacromaniac/pi-smith-agents#readme",
   "bugs": {
-    "url": "https://github.com/tintinweb/pi-subagents/issues"
+    "url": "https://github.com/anacromaniac/pi-smith-agents/issues"
   },
   "publishConfig": {
     "access": "public"
@@ -65,7 +66,7 @@
     "extensions": [
       "./dist/index.js"
     ],
-    "video": "https://github.com/tintinweb/pi-subagents/raw/master/media/demo.mp4",
-    "image": "https://github.com/tintinweb/pi-subagents/raw/master/media/screenshot.png"
+    "video": "https://github.com/anacromaniac/pi-smith-agents/raw/master/media/demo.mp4",
+    "image": "https://github.com/anacromaniac/pi-smith-agents/raw/master/media/screenshot.png"
   }
 }
