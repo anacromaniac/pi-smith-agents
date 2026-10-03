@@ -1,10 +1,10 @@
-# Contributing to @tintinweb/pi-subagents
+# Contributing to pi-smith-agents
 
 This guide exists to save both sides time.
 
 ## Philosophy
 
-`pi-subagents` is a [pi](https://pi.dev) extension, and it tries to stay focused:
+`pi-smith-agents` is a [pi](https://pi.dev) extension, and it tries to stay focused:
 spawn and orchestrate autonomous sub-agents that feel native to pi, and do that
 well. Features that don't serve that goal, or that bolt on unrelated complexity,
 are likely to be declined. When in doubt, open an issue and discuss the idea
@@ -68,5 +68,5 @@ Other guidelines:
 
 ## Questions?
 
-Open an [issue](https://github.com/tintinweb/pi-subagents/issues) — questions and
+Open an [issue](https://github.com/anacromaniac/pi-smith-agents/issues) — questions and
 discussion are welcome.
