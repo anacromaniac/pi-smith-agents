@@ -113,7 +113,7 @@ The same predicate silently scopes the events. **Every lifecycle event is top-le
 
 ## The notification race
 
-When a background agent finishes, pi-subagents sends the user a completion notification. If you have already shown the model that result yourself, that notification arrives on top of an answer that was already given, and it costs the parent a turn to dismiss. `subagents:rpc:consume` is how you say you have handled it — the bus-side half of what `get_subagent_result` does when it returns a result.
+When a background agent finishes, pi-subagents sends the user a completion notification. If you have already shown the model that result yourself, that notification arrives on top of an answer that was already given, and it costs the parent a turn to dismiss. `subagents:rpc:consume` is how you say you have handled it — the bus-side half of what `get_subagent_result` does when it returns a settled result. That tool never waits: queued/running status is immediate and does not consume the result. Retrieve results after the completion notification instead of polling; removing its `wait` parameter does not change these RPC channels or the registry's shutdown barrier.
 
 **When you send it decides whether it works.** The timeline:
 

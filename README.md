@@ -473,10 +473,9 @@ Check status and retrieve results from a background agent.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `agent_id` | string | yes | Agent ID to check |
-| `wait` | boolean | no | Wait for completion |
 | `verbose` | boolean | no | Include full conversation log |
 
-Cancelling a `wait: true` call (for example, with `Esc`) stops only the wait. The background agent keeps running, and its completion notification still arrives normally.
+This tool never waits: queued and running agents return their current status immediately, without consuming the pending result or suppressing its completion notification. Retrieve full results after the automatic completion notification; do not poll or sleep. `wait` is no longer a parameter, including in nested subagent tools. For work that must block inline, `Agent({ run_in_background: false, ... })` remains supported. Nested spawns still default to foreground; nested callers whose next action depends on a child must use `Agent({ run_in_background: false, ... })`. A detached nested child has no automatic completion notification and is stopped when its owner finishes.
 
 ### `steer_subagent`
 

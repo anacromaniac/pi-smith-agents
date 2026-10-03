@@ -176,32 +176,52 @@ describe("nested delegation e2e (real pi-mono, faux model)", () => {
 
     // Two hops home: worker → orchestrator → parent.
     expect(run.responseText).toContain(WORKER_MARKER);
+
+    const transcriptRoot = join(tmpdir(), `pi-subagents-${process.getuid?.() ?? 0}`, encodeCwd(cwd));
+    try {
+      const transcripts = findOutputFiles(transcriptRoot).map(file => readFileSync(file, "utf-8"));
+      const workerTranscript = transcripts.find(transcript => {
+        const first = JSON.parse(transcript.split("\n")[0]) as { message?: { content?: unknown } };
+        return first.message?.content === "Do the leaf work.";
+      });
+      expect(workerTranscript).toBeDefined();
+      expect(workerTranscript).toContain(WORKER_MARKER);
+    } finally {
+      rmSync(transcriptRoot, { recursive: true, force: true });
+    }
   });
 
-  it("backgrounds a nested child, polls it by id, and streams its transcript", async () => {
+  it("checks a pending nested child without blocking and creates its transcript", async () => {
     const cwd = mkdtempSync(join(tmpdir(), "nested-e2e-bg-"));
     tmpDirs.push(cwd);
     writeAgents(cwd);
     const transcriptRoot = join(tmpdir(), `pi-subagents-${process.getuid?.() ?? 0}`, encodeCwd(cwd));
     rmSync(transcriptRoot, { recursive: true, force: true });
 
-    const respond = (context: Context): FauxReply => {
+    let releaseWorker!: () => void;
+    const workerRelease = new Promise<void>(resolve => { releaseWorker = resolve; });
+    const respond = async (context: Context): Promise<FauxReply> => {
       const text = firstUserText(context);
 
-      if (text.includes("Do the leaf work")) return WORKER_MARKER;
+      if (text.includes("Do the leaf work")) {
+        await workerRelease;
+        return WORKER_MARKER;
+      }
 
       if (text.includes("Delegate this downward")) {
         const results = toolResultTexts(context);
         const spawned = results.find((r) => r.name === "Agent")?.text ?? "";
-        const polled = results.find((r) => r.name === "get_subagent_result")?.text;
-        // Third turn: the poll came back — echo it so a lost result fails loudly.
-        if (polled !== undefined) return `orchestrator polled: ${polled}`;
+        const checked = results.find((r) => r.name === "get_subagent_result")?.text;
+        if (checked !== undefined) {
+          releaseWorker();
+          return `orchestrator checked: ${checked}`;
+        }
         // Second turn: the spawn returned an id; fetch by exactly that id, which
         // also exercises the manager's ownership check from inside a child.
         if (spawned) {
           const id = /Agent ID:\s*(\S+)/.exec(spawned)?.[1];
           expect(id).toBeTruthy();
-          return fauxToolCall("get_subagent_result", { agent_id: id, wait: true });
+          return fauxToolCall("get_subagent_result", { agent_id: id });
         }
         return agentCall({
           subagent_type: "worker",
@@ -230,33 +250,24 @@ describe("nested delegation e2e (real pi-mono, faux model)", () => {
         beforeRun: () => { registerAgents(loadCustomAgents(cwd)); },
       });
 
-      // The background child ran and its output came back through the id the
-      // spawn handed out — so it was never queued behind its waiting parent.
+      // The parent resumed before the deferred child could finish.
       const orchestratorResult = run.parentSession.messages
         .filter((m) => m.role === "toolResult")
         .flatMap((m) => (m.content as Array<{ text?: string }>).map((b) => b.text ?? ""))
         .join("\n");
-      expect(orchestratorResult).toContain("orchestrator polled");
-      expect(orchestratorResult).toContain(WORKER_MARKER);
+      expect(orchestratorResult).toContain("orchestrator checked");
+      expect(orchestratorResult).toContain("is running");
+      expect(orchestratorResult).not.toContain(WORKER_MARKER);
 
-      // Only the REAL manager wires onSessionCreated → streamToOutputFile for a
-      // nested spawn, and only real rootSessionId propagation puts the file under
-      // this root. Identify the WORKER's own transcript by the prompt in its
-      // initial entry — matching the marker alone would also match the
-      // orchestrator's transcript, which merely echoes it, and would pass even
-      // with nested transcripts switched off entirely.
-      // Match on the FIRST line — writeInitialEntry seeds each transcript with the
-      // prompt that agent was given. Searching the whole file would also match the
-      // orchestrator's, which records the same string inside its Agent tool-call
-      // arguments, and would pass with nested transcripts switched off entirely.
+      // The owner finishes before the child, so the child's initial prompt is
+      // the guaranteed transcript entry. Match only that entry: the owner's
+      // transcript also contains this prompt inside its Agent call arguments.
       const transcripts = findOutputFiles(transcriptRoot).map((f) => readFileSync(f, "utf-8"));
       const workerTranscript = transcripts.find((t) => {
         const first = JSON.parse(t.split("\n")[0]) as { message?: { content?: unknown } };
         return first.message?.content === "Do the leaf work.";
       });
       expect(workerTranscript).toBeDefined();
-      // ...and it streamed the child's own turn, not just the seeded prompt.
-      expect(workerTranscript).toContain(WORKER_MARKER);
     } finally {
       rmSync(transcriptRoot, { recursive: true, force: true });
     }
