@@ -340,55 +340,46 @@ describe("child-safe nested Agent tools", () => {
     expect(result.content[0].text).toContain('isolation: "worktree"');
   });
 
-  it("waits for a queued owned child to start and settle", async () => {
+  it.each(["queued", "running"])("returns an owned %s child immediately without consuming it", async (status) => {
     const [, getResult] = tools();
+    const promiseRead = vi.fn(() => { throw new Error("Pending promise must not be read"); });
     const record = {
-      id: "queued-child",
-      status: "queued",
+      id: "pending-child",
+      status,
       parentAgentId: "parent-1",
-      promise: undefined as Promise<unknown> | undefined,
-      result: undefined as string | undefined,
+      resultConsumed: false,
+      get promise() { return promiseRead(); },
     };
     records.set(record.id, record);
-    setTimeout(() => {
-      record.status = "running";
-      record.promise = Promise.resolve().then(() => {
-        record.status = "completed";
-        record.result = "queued done";
-      });
-    }, 10);
 
-    const result = await execute(getResult, { agent_id: record.id, wait: true });
+    const result = await execute(getResult, { agent_id: record.id });
 
-    expect(result.content[0].text).toBe("queued done");
+    expect(getResult.parameters.properties).not.toHaveProperty("wait");
+    expect(result.content[0].text).toContain(`is ${status}`);
+    expect(result.content[0].text).toContain("No result is available yet");
+    expect(result.content[0].text).not.toMatch(/wait:|check back|poll/i);
+    expect(promiseRead).not.toHaveBeenCalled();
+    expect(record.resultConsumed).toBe(false);
+    expect(record.status).toBe(status);
   });
 
-  it("aborts a nested result wait without aborting the owned child", async () => {
+  it.each(["completed", "error", "stopped", "aborted", "steered"])("consumes an owned terminal %s child result", async (status) => {
     const [, getResult] = tools();
-    let settleChild: (() => void) | undefined;
     const record = {
-      id: "running-child",
-      status: "running",
+      id: "terminal-child",
+      status,
       parentAgentId: "parent-1",
-      promise: new Promise<void>(resolve => { settleChild = resolve; }),
+      result: "child output",
+      error: status === "error" ? "child failed" : undefined,
+      resultConsumed: false,
     };
     records.set(record.id, record);
 
-    const controller = new AbortController();
-    const outcome = getResult
-      .execute("call-abort", { agent_id: record.id, wait: true }, controller.signal, undefined, ctx())
-      .then(() => "resolved", (e: unknown) => (e instanceof Error ? e.name : String(e)));
+    const result = await execute(getResult, { agent_id: record.id });
 
-    controller.abort();
-    const settled = await Promise.race([
-      outcome,
-      new Promise(r => setTimeout(() => r("timed-out"), 100)),
-    ]);
-
-    expect(settled).toBe("AbortError");
-    // The wait was cancelled but the child was never aborted or consumed.
-    expect(record.status).toBe("running");
-    settleChild?.();
+    expect(result.content[0].text).toContain("child output");
+    expect(result.isError).toBe(status === "error");
+    expect(record.resultConsumed).toBe(true);
   });
 
   it("still rejects unknown types when the project configures a fallback", async () => {

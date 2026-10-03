@@ -15,7 +15,6 @@ import { isAbsolute, join } from "node:path";
 import { defineTool, type ExtensionAPI, type ExtensionCommandContext, type ExtensionContext, getAgentDir, getSettingsListTheme } from "@earendil-works/pi-coding-agent";
 import { Container, Key, matchesKey, type SettingItem, SettingsList, Spacer, Text } from "@earendil-works/pi-tui";
 import { Type } from "@sinclair/typebox";
-import { abortable } from "./abortable.js";
 import { hasAgentBadge, renderAgentName } from "./agent-color.js";
 import { buildNewAgentFile, disableInContent, enableInContent, isEmptyStub, locateAgentFile, personalAgentsDir, projectAgentsDir, serializeAgentFile } from "./agent-file-toggle.js";
 import { AgentManager, isTopLevelAgent } from "./agent-manager.js";
@@ -450,9 +449,6 @@ export default function (pi: ExtensionAPI) {
   // before they reach pi.sendMessage (fire-and-forget).
   const pendingNudges = new Map<string, ReturnType<typeof setTimeout>>();
   const NUDGE_HOLD_MS = 200;
-  // A queued result wait must observe completion before its held notification
-  // can fire, so successful waits can still suppress that redundant nudge.
-  const QUEUE_WAIT_POLL_MS = Math.floor(NUDGE_HOLD_MS / 4);
 
   function scheduleNudge(key: string, send: () => void, delay = NUDGE_HOLD_MS) {
     cancelNudge(key);
@@ -1999,7 +1995,7 @@ Terse command-style prompts produce shallow, generic work.
           if (existing.status === "running" || existing.status === "queued") {
             return textResult(
               `Agent "${params.resume}" is still ${existing.status} — it can only be resumed once its current run finishes.\n` +
-              `Use steer_subagent to send it a message mid-run, or get_subagent_result to wait for it.`,
+              `Use steer_subagent to send it a message mid-run, or await its automatic completion notification.`,
             );
           }
 
@@ -2741,42 +2737,25 @@ Terse command-style prompts produce shallow, generic work.
     name: SUBAGENT_TOOL_NAMES.GET_RESULT,
     label: "Get Agent Result",
     description:
-      "Check status and retrieve a background agent's full result — its completion notification carries only a preview. Use the agent ID returned by Agent.",
-    promptSnippet: "Check status and retrieve results from a background agent",
+      "Immediately check status and retrieve a background agent's full result — its completion notification carries only a preview. This tool never waits for completion. Use the agent ID returned by Agent.",
+    promptSnippet: "Immediately check status and retrieve results from a background agent",
+    promptGuidelines: [
+      "get_subagent_result never blocks. If an agent is queued or running, await its automatic completion notification rather than polling; continue with other work or respond to the user.",
+    ],
     parameters: Type.Object({
       agent_id: Type.String({
         description: "The agent ID to check. The agent's handle also works — its `name` if you gave it one, otherwise its type (`explore`, `explore-2`).",
       }),
-      wait: Type.Optional(
-        Type.Boolean({
-          description: "If true, wait for the agent to complete before returning. Default: false.",
-        }),
-      ),
       verbose: Type.Optional(
         Type.Boolean({
           description: "If true, include the agent's full conversation (messages + tool calls). Default: false.",
         }),
       ),
     }),
-    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       const record = resolveAgentRef(params.agent_id);
       if (!record || !isTopLevelAgent(record)) {
         return textResult(`Agent not found: "${params.agent_id}". It may have been cleaned up.`);
-      }
-
-      // Wait for completion if requested. Cancellation stops only this tool
-      // call; the background agent keeps running and remains unconsumed so its
-      // completion notification can still be delivered.
-      // Queued agents have no promise yet (it's created when the queue starts
-      // them), so poll until they leave the queue, then await like a running one.
-      if (params.wait && (record.status === "running" || record.status === "queued")) {
-        while (record.status === "queued") {
-          await abortable(
-            new Promise<void>((resolve) => setTimeout(resolve, QUEUE_WAIT_POLL_MS)),
-            signal,
-          );
-        }
-        if (record.promise) await abortable(record.promise, signal);
       }
 
       const displayName = getDisplayName(record.type);
@@ -2798,8 +2777,8 @@ Terse command-style prompts produce shallow, generic work.
         `Type: ${displayName} | Status: ${record.status}${getStatusNote(record.status)} | ${statsParts.join(" | ")}\n` +
         `Description: ${record.description}\n\n`;
 
-      if (record.status === "running") {
-        output += "Agent is still running. Use wait: true or check back later.";
+      if (record.status === "running" || record.status === "queued") {
+        output += `Agent is still ${record.status}. Await its automatic completion notification; continue with other work or respond to the user.`;
       } else if (record.status === "error") {
         output += `Error: ${record.error}${partialOutputSuffix(record)}`;
       } else {
@@ -2809,7 +2788,7 @@ Terse command-style prompts produce shallow, generic work.
       // Mark result as consumed — suppresses the completion notification
       if (record.status !== "running" && record.status !== "queued") {
         record.resultConsumed = true;
-        cancelNudge(params.agent_id);
+        cancelNudge(record.id);
       }
 
       // Verbose: include full conversation

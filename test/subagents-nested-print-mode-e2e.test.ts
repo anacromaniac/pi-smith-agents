@@ -3,7 +3,7 @@
  * opt-in nested delegation after #164 landed.
  *
  * `test/nested-delegation-e2e.test.ts` already pins the happy path (tool
- * admission + two-hop foreground return + background poll/transcript). This
+ * admission + two-hop foreground return + background status/transcript). This
  * file covers the production-boundary cases that suite still leaves open:
  * default-off injection, depth-cap tool stripping, background parent holds
  * while a child nests, and cross-parent ownership denial against the published
@@ -237,6 +237,8 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
 
   it("holds a background child while it performs real nested delegation", async () => {
     const calls = new Map<string, number>();
+    let releaseGrandchild!: () => void;
+    const grandchildRelease = new Promise<void>(resolve => { releaseGrandchild = resolve; });
     ({ run, cwd } = await runWithAgents(
       {
         background_delegator: "allowed_subagents: background_grandchild\n",
@@ -246,7 +248,7 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
         const route = userPrompt(ctx);
         calls.set(route, (calls.get(route) ?? 0) + 1);
         if (route === "background-grandchild-child") {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          await grandchildRelease;
           return "BACKGROUND_NESTED_RESULT";
         }
         if (route === "background-delegator-child") {
@@ -274,16 +276,22 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
           if (!id) throw new Error(`No background agent ID in: ${agents[0]}`);
           return toolCall(
             "get_subagent_result",
-            { agent_id: id, wait: true },
+            { agent_id: id },
             "get-background-result",
           );
         }
+        releaseGrandchild();
         return lastToolResult(ctx, "get_subagent_result");
       },
       { prompt: "root-background", maxModelCalls: 24 },
     ));
 
-    expect(run.responseText).toContain("BACKGROUND_NESTED_RESULT");
+    expect(run.responseText).toContain("Status: running");
+    expect(run.responseText).toContain("Await its automatic completion notification");
+    const spawned = toolResults({ messages: run.parentSession.messages } as Context, "Agent")[0];
+    const id = spawned.match(/Agent ID: ([^\s]+)/)?.[1];
+    expect(id).toBeDefined();
+    expect(run.manager?.getRecord(id!)?.result).toContain("BACKGROUND_NESTED_RESULT");
     expect(calls.get("background-delegator-child")).toBe(2);
     expect(calls.get("background-grandchild-child")).toBe(1);
     expect(
@@ -310,6 +318,8 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
     let ownedChildEntered!: () => void;
     let ownerHolding!: () => void;
     let nestedId = "";
+    let probeFinished!: () => void;
+    const probeReady = new Promise<void>(resolve => { probeFinished = resolve; });
     const ownedChildReady = new Promise<void>((resolve) => {
       ownedChildEntered = resolve;
     });
@@ -382,6 +392,7 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
             }
             probeResults.get = gets.at(-1);
             probeResults.steer = steers.at(-1);
+            probeFinished();
             return "OWNERSHIP_PROBE_DONE";
           }
           const agents = toolResults(ctx, "Agent");
@@ -404,14 +415,14 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
           }
           const results = toolResults(ctx, "get_subagent_result");
           if (results.length === 0) {
-            // Poll the probe (second background agent) for the denial outcome.
+            // Check the probe's status without blocking on its denial outcome.
             const probeSpawn = agents[1];
             const probeId = probeSpawn.match(/Agent ID: ([^\s]+)/)?.[1];
             if (!probeId) throw new Error(`No probe ID in: ${probeSpawn}`);
             return toolCall(
               "get_subagent_result",
-              { agent_id: probeId, wait: true },
-              "await-probe",
+              { agent_id: probeId },
+              "check-probe",
             );
           }
           return lastToolResult(ctx, "get_subagent_result");
@@ -437,7 +448,8 @@ describe("PR #164 nested agents through the real print-mode boundary", () => {
       if (waitTimer) clearTimeout(waitTimer);
       expect(waitState).toBe("pending");
 
-      expect(run.responseText).toContain("OWNERSHIP_PROBE_DONE");
+      await waitForChildReady(probeReady, 5_000);
+      expect(run.responseText).toContain("Status: running");
       expect(probeResults.get).toBeDefined();
       expect(probeResults.steer).toBeDefined();
       expect(probeResults.get).toMatch(

@@ -7,7 +7,6 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { abortable } from "./abortable.js";
 import {
   buildAgentRegistry,
   getAgentConfigIn,
@@ -122,7 +121,7 @@ function ownsRecord(record: AgentRecord | undefined, parentAgentId: string): rec
  *     `get_subagent_result`, and hits "not owned by this parent" (#174, the same
  *     trap the top-level foreground path fell into).
  *   - "fetched": `get_subagent_result` on a background child. The parent holds a
- *     valid id and can poll again, so the background wording applies.
+ *     valid id and can retrieve its output, so the background wording applies.
  */
 type ResultPosition = "inline" | "fetched";
 
@@ -131,7 +130,7 @@ function formatRecord(record: AgentRecord, position: ResultPosition): string {
     return `Agent failed: ${record.error ?? "unknown error"}${partialOutputSuffix(record)}`;
   }
   if (record.status === "queued" || record.status === "running") {
-    return `Agent ${record.id} is ${record.status}.`;
+    return `Agent ${record.id} is ${record.status}. No result is available yet. Continue with other work; nested children have no automatic completion notification.`;
   }
   // A truncated run must not read as a finished one. The top-level path carries
   // this in its result headline; a nested result has no headline, so the note
@@ -372,25 +371,17 @@ export function createNestedSubagentTools(context: NestedToolContext): ToolDefin
   const resultTool = defineTool({
     name: NESTED_TOOL_NAMES[1],
     label: "Get Nested Agent Result",
-    description: "Check or wait for a background nested agent owned by this parent.",
+    description: "Immediately check status or retrieve the result of a background nested agent owned by this parent. Never waits for completion; nested children have no automatic completion notification.",
     parameters: Type.Object({
       agent_id: Type.String(),
-      wait: Type.Optional(Type.Boolean()),
     }),
-    execute: async (_toolCallId, params, signal) => {
+    execute: async (_toolCallId, params) => {
       const record = context.manager.getRecord(params.agent_id);
       if (!ownsRecord(record, context.parentAgentId)) {
         return textResult(`Nested agent not found or not owned by this parent: "${params.agent_id}".`, true);
       }
-      // Wait for completion if requested. Cancellation (e.g. the parent's tool
-      // call is aborted) stops only this wait; the nested child keeps running and
-      // stays unconsumed. Queued records have no promise until the manager starts
-      // them, so poll — abortably — until they leave the queue, then await.
-      if (params.wait && (record.status === "queued" || record.status === "running")) {
-        while (record.status === "queued") {
-          await abortable(new Promise<void>(resolve => setTimeout(resolve, 250)), signal);
-        }
-        if (record.promise) await abortable(record.promise, signal);
+      if (record.status !== "queued" && record.status !== "running") {
+        record.resultConsumed = true;
       }
       return textResult(formatRecord(record, "fetched"), record.status === "error");
     },

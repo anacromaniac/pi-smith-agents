@@ -31,7 +31,7 @@ You do not have to say "workflow" — the model picks the tool — but saying it
 
 ### 2. Read what came back
 
-The tool returns immediately. The run continues in the background and notifies you when it is done.
+The tool returns immediately. The run continues in the background and notifies you when it is done. Do not poll or sleep waiting for it. For ordinary background agents, `get_subagent_result` likewise never waits: it returns queued/running status immediately, and full retrieval follows the automatic completion notification. Its former `wait` parameter is removed, including from nested tools. Nested children have no automatic completion notifications: use `Agent({ run_in_background: false, ... })` when a nested caller needs the child's result inline. Foreground `Agent` calls remain supported.
 
 ```text
 Workflow "auth-audit" started in the background.

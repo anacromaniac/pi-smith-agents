@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **BREAKING: `get_subagent_result` no longer accepts `wait`, including in nested tools.** Queued/running status returns immediately; retrieve top-level background results after their automatic completion notifications. Nested children have no automatic notifications: nested callers needing a child's result inline must use `Agent({ run_in_background: false, ... })`. Foreground `Agent` calls remain supported.
 - **BREAKING: `general-purpose` is the only built-in agent; its default model is configurable with `generalPurposeModel`.** Copy the preserved `Explore` and `Plan` definitions from `examples/agents/` into `.pi/agents/` to retain their role prompts and read-only built-in tools; otherwise those names follow the unknown-type fallback policy. The setting requires an exact available `provider/modelId`, per-call `model` wins, and `null` inherits the parent (clearing any global value when set per-project); custom definitions are unaffected.
 
 ### Fixed
