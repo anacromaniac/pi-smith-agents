@@ -11,6 +11,8 @@ import { type AgentManager, isTopLevelAgent } from "../agent-manager.js";
 import { getConfig } from "../agent-types.js";
 import type { AgentInvocation, SubagentType, WidgetMode } from "../types.js";
 import { getLifetimeCost, getLifetimeTotal, getSessionContextPercent, type LifetimeUsage, type SessionLike } from "../usage.js";
+import { displayState, elapsedMs, formatDuration as formatWorkflowDuration } from "../workflow/progress.js";
+import type { WorkflowTask } from "../workflow/task.js";
 
 // ---- Constants ----
 
@@ -42,7 +44,6 @@ export type Theme = {
 };
 
 export type UICtx = {
-  setStatus(key: string, text: string | undefined): void;
   setWidget(
     key: string,
     content: undefined | ((tui: any, theme: Theme) => { render(): string[]; invalidate(): void }),
@@ -216,7 +217,7 @@ export function buildInvocationTags(
 
 /** Truncate text to a single line, max `len` chars. */
 function truncateLine(text: string, len = 60): string {
-  const line = text.split("\n").find(l => l.trim())?.trim() ?? "";
+  const line = text.split(/[\r\n]/).find(l => l.trim())?.trim() ?? "";
   if (line.length <= len) return line;
   return line.slice(0, len) + "…";
 }
@@ -264,8 +265,6 @@ export class AgentWidget {
   private widgetRegistered = false;
   /** Cached TUI reference from widget factory callback, used for requestRender(). */
   private tui: any | undefined;
-  /** Last status bar text, used to avoid redundant setStatus calls. */
-  private lastStatusText: string | undefined;
 
   constructor(
     private manager: AgentManager,
@@ -290,6 +289,7 @@ export class AgentWidget {
      * conversation viewer unconditionally.
      */
     private showModel: () => boolean = () => false,
+    private workflows: () => readonly WorkflowTask[] = () => [],
   ) {}
 
   /**
@@ -312,6 +312,12 @@ export class AgentWidget {
     }
   }
 
+  private widgetWorkflows(): readonly WorkflowTask[] {
+    if (this.mode() === "off") return [];
+    return this.workflows().filter(task => task.status === "running" || task.status === "paused"
+      || this.shouldShowFinished(task.id, task.status === "completed" ? "completed" : "error"));
+  }
+
   /** Set the UI context (grabbed from first tool execution). */
   setUICtx(ctx: UICtx) {
     if (ctx !== this.uiCtx) {
@@ -320,7 +326,6 @@ export class AgentWidget {
       this.uiCtx = ctx;
       this.widgetRegistered = false;
       this.tui = undefined;
-      this.lastStatusText = undefined;
     }
   }
 
@@ -423,8 +428,10 @@ export class AgentWidget {
       && this.shouldShowFinished(a.id, a.status),
     );
 
-    const hasActive = running.length > 0 || queued.length > 0;
-    const hasFinished = finished.length > 0;
+    const workflows = this.widgetWorkflows();
+    const hasActive = running.length > 0 || queued.length > 0
+      || workflows.some(task => task.status === "running" || task.status === "paused");
+    const hasFinished = finished.length > 0 || workflows.length > 0;
 
     // Nothing to show — return empty (widget will be unregistered by update())
     if (!hasActive && !hasFinished) return [];
@@ -437,6 +444,38 @@ export class AgentWidget {
 
     // Build sections separately for overflow-aware assembly.
     // Each running agent = 2 lines (header + activity), finished = 1 line, queued = 1 line.
+
+    const workflowRows: { task: WorkflowTask; line: string; children: { line: string; live: boolean }[]; selected: number[] }[] = [];
+    for (const task of workflows) {
+      const color = task.status === "running" ? "accent" : task.status === "completed" ? "success"
+        : task.status === "paused" ? "warning" : task.status === "killed" ? "dim" : "error";
+      const icon = task.status === "running" ? frame : task.status === "completed" ? "✓"
+        : task.status === "paused" ? "Ⅱ" : task.status === "killed" ? "■" : "✗";
+      const parts = [task.status, `${task.doneCount}/${task.agentCount} completed`,
+        formatTokens(task.totalTokens), formatWorkflowDuration(elapsedMs(task, task.pausedAt ?? Date.now()))];
+      const activity = task.error ?? task.logs.at(-1);
+      if (activity) parts.push(truncateLine(activity));
+      const line = truncate(`${theme.fg("dim", "├─")} ${theme.fg(color, icon)} workflow  ${theme.fg("muted", task.meta?.name ?? task.workflowName ?? task.id)} ${theme.fg("dim", "·")} ${theme.fg("dim", parts.join(" · "))}`);
+      const active = task.status === "running" || task.status === "paused";
+      const children = task.agentEntries.map(entry => {
+        const state = displayState(entry, active);
+        const live = state === "queued" || state === "running";
+        const childColor = live ? "accent" : state === "done" ? "success"
+          : state === "failed" || state === "blocked" ? "error" : "dim";
+        const childParts = [state + (entry.cached ? " (cached)" : "")];
+        if (this.showModel()) {
+          if (entry.model) childParts.push(entry.model + (entry.requestedModel ? ` (asked ${entry.requestedModel})` : ""));
+          if (entry.thinking) childParts.push(`thinking: ${entry.thinking}${entry.requestedThinking ? ` (asked ${entry.requestedThinking})` : ""}`);
+        }
+        if (entry.toolCalls !== undefined) childParts.push(`${entry.toolCalls} tool call${entry.toolCalls === 1 ? "" : "s"}`);
+        if (entry.tokens !== undefined) childParts.push(formatTokens(entry.tokens));
+        if (entry.durationMs !== undefined) childParts.push(formatWorkflowDuration(entry.durationMs));
+        const preview = entry.error ?? entry.resultPreview ?? entry.promptPreview;
+        if (preview) childParts.push(truncateLine(preview));
+        return { live, line: `${theme.fg("muted", truncateLine(entry.label))} ${theme.fg("dim", "·")} ${theme.fg(childColor, childParts.join(" · "))}` };
+      });
+      workflowRows.push({ task, line, children, selected: [] });
+    }
 
     const finishedLines: string[] = [];
     for (const a of finished) {
@@ -489,85 +528,88 @@ export class AgentWidget {
       ? truncate(theme.fg("dim", "├─") + ` ${theme.fg("muted", "◦")} ${theme.fg("dim", `${queued.length} queued`)}`)
       : undefined;
 
-    // Assemble with overflow cap (heading + overflow indicator = 2 reserved lines).
-    const maxBody = MAX_WIDGET_LINES - 1; // heading takes 1 line
-    const totalBody = finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
+    const activeWorkflows = workflowRows.filter(row => row.task.status === "running" || row.task.status === "paused");
+    const finishedWorkflows = workflowRows.filter(row => row.task.status !== "running" && row.task.status !== "paused");
+    const maxBody = MAX_WIDGET_LINES - 1;
+    const childCount = workflowRows.reduce((count, row) => count + row.children.length, 0);
+    const totalBody = workflowRows.length + childCount + finishedLines.length + runningLines.length * 2 + (queuedLine ? 1 : 0);
+    const overflow = totalBody > maxBody;
+    let budget = maxBody - (overflow ? 1 : 0) - (queuedLine ? 1 : 0);
+    const roots: { lines: string[]; workflow?: typeof workflowRows[number] }[] = [];
+    let hiddenRunning = 0;
+    let hiddenFinished = 0;
+    let hiddenWorkflows = 0;
 
-    const lines: string[] = [truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, "Agents"))];
-
-    if (totalBody <= maxBody) {
-      // Everything fits — add all lines and fix up connectors for the last item.
-      lines.push(...finishedLines);
-      for (const pair of runningLines) lines.push(...pair);
-      if (queuedLine) lines.push(queuedLine);
-
-      // Fix last connector: swap ├─ → └─ and │ → space for activity lines.
-      if (lines.length > 1) {
-        const last = lines.length - 1;
-        lines[last] = lines[last].replace("├─", "└─");
-        // If last item is a running agent activity line, fix indent of that line
-        // and fix the header line above it.
-        if (runningLines.length > 0 && !queuedLine) {
-          // The last two lines are the last running agent's header + activity.
-          if (last >= 2) {
-            lines[last - 1] = lines[last - 1].replace("├─", "└─");
-            lines[last] = lines[last].replace("│  ", "   ");
-          }
-        }
-      }
-    } else {
-      // Overflow — prioritize: running > queued > finished.
-      // Reserve 1 line for overflow indicator.
-      let budget = maxBody - 1;
-      let hiddenRunning = 0;
-      let hiddenFinished = 0;
-
-      // Reserve the queued line's row up front. It is a single summary of N
-      // waiting agents, so it cannot be folded into the "+N more" count (which
-      // is denominated in agents) without either under-reporting it as 1 or
-      // inflating the total with agents that were never getting their own rows.
-      // Reserving costs at most one running agent — which IS counted below —
-      // and makes the drop unreachable. It matters most exactly when it used to
-      // vanish: the pool is saturated and the queue is what the user needs to see.
-      const queuedReserve = queuedLine ? 1 : 0;
-      budget -= queuedReserve;
-
-      // 1. Running agents (2 lines each)
-      for (const pair of runningLines) {
-        if (budget >= 2) {
-          lines.push(...pair);
-          budget -= 2;
-        } else {
-          hiddenRunning++;
-        }
-      }
-
-      // 2. Queued line (always fits — its row was reserved above)
-      if (queuedLine) {
-        budget += queuedReserve;
-        lines.push(queuedLine);
+    for (const row of activeWorkflows) {
+      if (budget >= 1) {
+        roots.push({ lines: [row.line], workflow: row });
         budget--;
-      }
+      } else hiddenWorkflows++;
+    }
+    // Preserve standalone live-agent and queue visibility before spending rows on children.
+    for (const pair of runningLines) {
+      if (budget >= 2) {
+        roots.push({ lines: pair });
+        budget -= 2;
+      } else hiddenRunning++;
+    }
+    if (queuedLine) roots.push({ lines: [queuedLine] });
 
-      // 3. Finished agents
-      for (const fl of finishedLines) {
-        if (budget >= 1) {
-          lines.push(fl);
+    let shownChildren = 0;
+    const selectWorkflowChildren = (live: boolean): void => {
+      for (const root of roots) {
+        const row = root.workflow;
+        if (!row) continue;
+        for (let index = 0; index < row.children.length && budget > 0; index++) {
+          if (row.children[index].live !== live) continue;
+          row.selected.push(index);
           budget--;
-        } else {
-          hiddenFinished++;
+          shownChildren++;
         }
       }
-
-      // Overflow summary
-      const overflowParts: string[] = [];
-      if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
-      if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
-      const overflowText = overflowParts.join(", ");
-      lines.push(truncate(theme.fg("dim", "└─") + ` ${theme.fg("dim", `+${hiddenRunning + hiddenFinished} more (${overflowText})`)}`)
-      );
+    };
+    selectWorkflowChildren(true);
+    for (const row of finishedWorkflows) {
+      if (budget >= 1) {
+        roots.push({ lines: [row.line], workflow: row });
+        budget--;
+      } else hiddenWorkflows++;
+    }
+    selectWorkflowChildren(false);
+    for (const line of finishedLines) {
+      if (budget >= 1) {
+        roots.push({ lines: [line] });
+        budget--;
+      } else hiddenFinished++;
     }
 
+    const hiddenChildren = childCount - shownChildren;
+    if (overflow) {
+      const overflowParts: string[] = [];
+      if (hiddenWorkflows > 0) overflowParts.push(`${hiddenWorkflows} workflows`);
+      if (hiddenChildren > 0) overflowParts.push(`${hiddenChildren} workflow agents`);
+      if (hiddenRunning > 0) overflowParts.push(`${hiddenRunning} running`);
+      if (hiddenFinished > 0) overflowParts.push(`${hiddenFinished} finished`);
+      const hiddenTotal = hiddenWorkflows + hiddenChildren + hiddenRunning + hiddenFinished;
+      roots.push({ lines: [theme.fg("dim", "├─") + ` ${theme.fg("dim", `+${hiddenTotal} more (${overflowParts.join(", ")})`)}`] });
+    }
+
+    const lines: string[] = [truncate(theme.fg(headingColor, headingIcon) + " " + theme.fg(headingColor, workflows.length > 0 ? "Agents & workflows" : "Agents"))];
+    for (let index = 0; index < roots.length; index++) {
+      const root = roots[index];
+      const lastRoot = index === roots.length - 1;
+      lines.push(truncate(lastRoot ? root.lines[0].replace("├─", "└─") : root.lines[0]));
+      for (const activity of root.lines.slice(1)) {
+        lines.push(truncate(lastRoot ? activity.replace("│  ", "   ") : activity));
+      }
+      const row = root.workflow;
+      if (!row) continue;
+      row.selected.sort((a, b) => a - b);
+      for (let child = 0; child < row.selected.length; child++) {
+        const connector = `${lastRoot ? "   " : "│  "}${child === row.selected.length - 1 ? "└─" : "├─"}`;
+        lines.push(truncate(`${theme.fg("dim", connector)} ${row.children[row.selected[child]].line}`));
+      }
+    }
     return lines;
   }
 
@@ -585,7 +627,10 @@ export class AgentWidget {
       else if (a.status === "queued") { queuedCount++; }
       else if (a.completedAt && this.shouldShowFinished(a.id, a.status)) { hasFinished = true; }
     }
-    const hasActive = runningCount > 0 || queuedCount > 0;
+    const workflows = this.widgetWorkflows();
+    const hasActive = runningCount > 0 || queuedCount > 0
+      || workflows.some(task => task.status === "running" || task.status === "paused");
+    hasFinished ||= workflows.length > 0;
 
     // Nothing to show — clear widget
     if (!hasActive && !hasFinished) {
@@ -594,30 +639,12 @@ export class AgentWidget {
         this.widgetRegistered = false;
         this.tui = undefined;
       }
-      if (this.lastStatusText !== undefined) {
-        this.uiCtx.setStatus("subagents", undefined);
-        this.lastStatusText = undefined;
-      }
       if (this.widgetInterval) { clearInterval(this.widgetInterval); this.widgetInterval = undefined; }
       // Clean up stale entries
       for (const [id] of this.finishedTurnAge) {
-        if (!allAgents.some(a => a.id === id)) this.finishedTurnAge.delete(id);
+        if (!allAgents.some(a => a.id === id) && !this.workflows().some(task => task.id === id)) this.finishedTurnAge.delete(id);
       }
       return;
-    }
-
-    // Status bar — only call setStatus when the text actually changes
-    let newStatusText: string | undefined;
-    if (hasActive) {
-      const statusParts: string[] = [];
-      if (runningCount > 0) statusParts.push(`${runningCount} running`);
-      if (queuedCount > 0) statusParts.push(`${queuedCount} queued`);
-      const total = runningCount + queuedCount;
-      newStatusText = `${statusParts.join(", ")} agent${total === 1 ? "" : "s"}`;
-    }
-    if (newStatusText !== this.lastStatusText) {
-      this.uiCtx.setStatus("subagents", newStatusText);
-      this.lastStatusText = newStatusText;
     }
 
     this.widgetFrame++;
@@ -650,10 +677,8 @@ export class AgentWidget {
     }
     if (this.uiCtx) {
       this.uiCtx.setWidget("agents", undefined);
-      this.uiCtx.setStatus("subagents", undefined);
     }
     this.widgetRegistered = false;
     this.tui = undefined;
-    this.lastStatusText = undefined;
   }
 }

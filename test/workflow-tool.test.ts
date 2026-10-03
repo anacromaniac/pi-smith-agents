@@ -1054,10 +1054,9 @@ describe("--subagents-workflow-file", () => {
       ...overrides,
     });
 
-  it("registers the fleet row as soon as a run starts, not when it settles", async () => {
-    // The regression this guards: a run's agents are owned by it, so their
-    // lifecycle callbacks no longer refresh the fleet — and nothing else did,
-    // which left a running workflow invisible in FleetView.
+  it("registers the above-editor widget as soon as a run starts, not when it settles", async () => {
+    // Owned children do not refresh top-level UI, so the run itself must
+    // register its summary before its first child starts.
     const booted = makePi();
     subagentsExtension(booted.pi);
     const context = uiCtx();
@@ -1065,25 +1064,36 @@ describe("--subagents-workflow-file", () => {
     context.ui.setWidget.mockClear();
 
     await booted.tools.get("SubagentWorkflow").execute(
-      "tc-fleet",
+      "tc-widget",
       { script: inlineScript },
       undefined, undefined, ctx({ cwd: hermetic.dir }),
     );
 
-    const keys = context.ui.setWidget.mock.calls.map((call: any[]) => call[0]);
-    expect(keys, "the run has to claim its row before its first agent starts").toContain("fleet");
+    expect(context.ui.setWidget).toHaveBeenCalledWith(
+      "agents", expect.any(Function), { placement: "aboveEditor" },
+    );
+    expect(context.ui.onTerminalInput).not.toHaveBeenCalled();
+    expect(context.ui.setStatus).not.toHaveBeenCalled();
+    await booted.lifecycle.get("session_shutdown")?.({}, context);
   });
 
-  it("captures the UI at session_start, before any tool has executed", () => {
-    // A flag-launched workflow runs from session_start, so a UI captured only
-    // from tool_execution_start would leave it with no widget and no fleet row.
-    const booted = makePi();
+  it("captures the UI at session_start without intercepting terminal input", async () => {
+    // The startup flag must register a summary without a tool execution event
+    // having supplied the UI first.
+    const path = join(hermetic.dir, "flow.js");
+    writeFileSync(path, fileScript);
+    const booted = makePi({ [WORKFLOW_FILE_FLAG]: path });
     subagentsExtension(booted.pi);
     const context = uiCtx();
 
-    booted.lifecycle.get("session_start")?.({}, context);
+    await booted.lifecycle.get("session_start")?.({}, context);
 
-    expect(context.ui.onTerminalInput, "the fleet list only hooks input once it has a UI").toHaveBeenCalled();
+    expect(context.ui.setWidget).toHaveBeenCalledWith(
+      "agents", expect.any(Function), { placement: "aboveEditor" },
+    );
+    expect(context.ui.onTerminalInput).not.toHaveBeenCalled();
+    expect(context.ui.setStatus).not.toHaveBeenCalled();
+    await booted.lifecycle.get("session_shutdown")?.({}, context);
   });
 
   it("registers the flag at activation but does not read it there", () => {

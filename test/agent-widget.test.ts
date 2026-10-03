@@ -97,7 +97,6 @@ describe("AgentWidget", () => {
     );
     let factory: any;
     widget.setUICtx({
-      setStatus: () => {},
       setWidget: (_key, content) => { factory = content; },
     });
     widget.update();
@@ -124,7 +123,7 @@ describe("AgentWidget", () => {
 
   it("hides a workflow's agents in every coordinator widget mode", () => {
     // They belong to the run, which reports for them through its own card and
-    // its own row in the fleet list.
+    // its summary in the above-editor widget.
     const manager = {
       listAgents: () => [makeRecord("child", { isBackground: true, workflowId: "wf_abc" })],
     };
@@ -208,7 +207,7 @@ describe("AgentWidget", () => {
       () => true,
     );
     let factory: any;
-    widget.setUICtx({ setStatus: () => {}, setWidget: (_key, content) => { factory = content; } });
+    widget.setUICtx({ setWidget: (_key, content) => { factory = content; } });
     for (const r of records) if (r.status === "completed") widget.markFinished(r.id);
     widget.update();
     const lines = factory({ terminal: { columns: 200 }, requestRender: () => {} }, theme).render().join("\n");
